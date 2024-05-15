@@ -91,7 +91,7 @@ def update_facility_paths(facility, key, office_url):
     path_map = {
         'imagemagick': ('@@CONVERT@@', '/usr/local/bin/convert', '@@COMPOSITE@@', '/usr/local/bin/composite'),
         'exiftool': ('@@EXIFTOOL@@', '/usr/local/bin/exiftool'),
-        'ghostscript': ('@@GS@@', '/usr/bin/gs'),
+        'ghostscript': ('@@GS@@', '/usr/local/bin/gs'),
         'wkhtmltoimage': ('@@HTML2IMG@@', '/usr/bin/wkhtmltoimage'),
         'pngquant': ('@@PNGQUANT@@', '/usr/bin/pngquant'),
         'ffmpeg': ('@@FFMPEG-PATH@@', '/usr/local/bin/ffmpeg'),
