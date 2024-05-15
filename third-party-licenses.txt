@@ -1,0 +1,25 @@
+# Third-Party Licenses
+
+## ImageMagick
+License: Apache-2.0
+URL: https://imagemagick.org/script/license.php
+
+## Ghostscript
+License: AGPL-3.0
+URL: https://ghostscript.com/licensing/index.html
+
+## ExifTool
+License: GPL-1.0
+URL: https://exiftool.org/#license
+
+## FFmpeg
+License: LGPL-2.1
+URL: https://www.ffmpeg.org/legal.html
+
+## pngquant
+License: GPL-3.0
+URL: https://github.com/kornelski/pngquant/blob/master/COPYRIGHT
+
+## wkhtmltoimage
+License: LGPL-3.0
+URL: https://github.com/wkhtmltopdf/wkhtmltopdf/blob/master/LICENSE

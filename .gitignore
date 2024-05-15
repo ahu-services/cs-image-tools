@@ -1,0 +1,98 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+*.egg-info/
+dist/
+build/
+*.egg
+*.whl
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# VS Code
+.vscode/
+
+# PyCharm
+.idea/
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Docker
+*.log
+docker-compose.override.yml
+docker-compose.local.yml
+.dockerignore
+Dockerfile
+tmp/
+temp/
+
+# Test and Coverage reports
+.coverage
+coverage.xml
+*.cover
+*.py,cover
+.tox/
+.nox/
+.cache/
+nosetests.xml
+coverage/
+htmlcov/
+.pytest_cache/
+
+# MyPy
+.mypy_cache/
+
+# Environments
+.env
+.env.*
+
+# Virtual environment
+.venv/
+
+# GitHub Actions
+.github/workflows/*_result/
+.github/workflows/*_cache/
+
+# Logs
+logs/
+*.log
+
+# Editor settings
+*.sublime-project
+*.sublime-workspace
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# Ansible
+*~.retry
+*.retry
+
+# Custom folders or files
+my_custom_folder/
+my_custom_file.txt
+
+# custom icc profiles
+iccprofiles
