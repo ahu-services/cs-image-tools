@@ -113,7 +113,10 @@ RUN ARCH=$(uname -m); \
     exit 1; \
     fi; \
     mkdir /TOOLS/; cd /TOOLS; wget https://corretto.aws/downloads/latest/amazon-corretto-${JDK_VERSION}-${ARCH}-linux-jdk.deb; \
-    test -d /app/iccprofiles && cp -r /app/iccprofiles /TOOLS/build_iccprofiles
+    if [ -d /app/iccprofiles ]; then cp -r /app/iccprofiles /TOOLS/build_iccprofiles; fi
+
+# Add 3rd party license information
+COPY LICENSE third-party-licenses.txt /TOOLS/
 
 # Copy binaries from builder stages
 COPY --from=im-builder /IM-build/ /TOOLS/
@@ -121,7 +124,7 @@ COPY --from=ghostscript-builder /ghostscript-build/ /TOOLS/
 COPY --from=ffmpeg-builder /ffmpeg-build/ /TOOLS/
 
 ### Final image
-FROM debian:trixie-slim
+FROM debian:trixie-slim as final
 RUN apt-get update && apt-get remove -y wpasupplicant && apt-get upgrade -y && \
     apt-get install -y wget pkg-config wkhtmltopdf pngquant \
     libraqm-dev libfftw3-dev libtool python3 python3-pip ca-certificates
@@ -145,9 +148,18 @@ RUN ldconfig; \
 
 # Add Service-Client if included in build
 COPY --from=image-tools-combined /opt/corpus/ /opt/corpus/
+# Add entrypoint script
+COPY entrypoint.py /usr/local/bin/entrypoint.py
 
+### Test Stage
+FROM final as test
+RUN pip3 install pytest --break-system-packages
+COPY tests/test_installation.py /test_installation.py
+
+CMD ["pytest", "-v", "/test_installation.py"]
+
+### Release
+FROM final
 # Expose Service-Client Ports
 EXPOSE 30543 30544 30545
-
-COPY entrypoint.py /usr/local/bin/entrypoint.py
 ENTRYPOINT ["python3", "/usr/local/bin/entrypoint.py"]

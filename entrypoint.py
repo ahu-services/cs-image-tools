@@ -78,6 +78,16 @@ def configure_xml(svc_host, svc_user):
     tree.write(path)
     print("XML configuration updated.")
 
+def get_path_map():
+    return {
+        'imagemagick': ('@@CONVERT@@', '/usr/local/bin/convert', '@@COMPOSITE@@', '/usr/local/bin/composite'),
+        'exiftool': ('@@EXIFTOOL@@', '/usr/local/bin/exiftool'),
+        'ghostscript': ('@@GS@@', '/usr/local/bin/gs'),
+        'wkhtmltoimage': ('@@HTML2IMG@@', '/usr/bin/wkhtmltoimage'),
+        'pngquant': ('@@PNGQUANT@@', '/usr/bin/pngquant'),
+        'ffmpeg': ('@@FFMPEG-PATH@@', '/usr/local/bin/ffmpeg'),
+    }
+
 def update_facility_paths(facility, key, office_url):
     """
     Helper function to update path and enabled attributes in XML for specific facilities.
@@ -87,15 +97,8 @@ def update_facility_paths(facility, key, office_url):
     facility (ET.Element): XML element that contains facility configuration.
     key (str): Facility key to determine which paths to update.
     """
-    # Common facility paths
-    path_map = {
-        'imagemagick': ('@@CONVERT@@', '/usr/local/bin/convert', '@@COMPOSITE@@', '/usr/local/bin/composite'),
-        'exiftool': ('@@EXIFTOOL@@', '/usr/local/bin/exiftool'),
-        'ghostscript': ('@@GS@@', '/usr/local/bin/gs'),
-        'wkhtmltoimage': ('@@HTML2IMG@@', '/usr/bin/wkhtmltoimage'),
-        'pngquant': ('@@PNGQUANT@@', '/usr/bin/pngquant'),
-        'ffmpeg': ('@@FFMPEG-PATH@@', '/usr/local/bin/ffmpeg'),
-    }
+
+    path_map = get_path_map()
 
     # Update paths based on facility key
     if key in path_map:
