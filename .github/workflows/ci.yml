@@ -12,10 +12,17 @@ on:
 
 jobs:
   build-and-test:
-    runs-on: ubuntu-latest
     strategy:
       matrix:
+        os: [ubuntu-latest, macos-latest]
         arch: [amd64, arm64]
+        include:
+          - os: ubuntu-latest
+            arch: amd64
+          - os: macos-latest
+            arch: arm64
+
+    runs-on: ${{ matrix.os }}
 
     steps:
     - name: Checkout repository
@@ -35,6 +42,7 @@ jobs:
           ${{ runner.os }}-buildx-
 
     - name: Set up QEMU
+      if: matrix.arch == 'arm64' && matrix.os == 'ubuntu-latest'
       uses: docker/setup-qemu-action@v2
 
     - name: Login to DockerHub
@@ -43,16 +51,16 @@ jobs:
         username: ahuservices
         password: ${{ secrets.DOCKER_TOKEN }}
 
-    - name: Build Docker image for testing
+    - name: Build Docker image
       id: build_image
       run: |
         docker buildx create --use --name mybuilder
         docker buildx inspect mybuilder --bootstrap
-        docker buildx build --target test --platform linux/${{ matrix.arch }} --tag cs-image-tools:${{ github.sha }}-${{ matrix.arch }} --output type=docker .
+        docker buildx build --platform linux/${{ matrix.arch }} --tag ahuservices/cs-image-tools:${{ github.sha }}-${{ matrix.arch }} --cache-to=type=inline --output type=docker .
 
     - name: Run tests
       run: |
-        docker run --rm cs-image-tools:${{ github.sha }}-${{ matrix.arch }}
+        docker run --rm ahuservices/cs-image-tools:${{ github.sha }}-${{ matrix.arch }} pytest
 
   multi-arch-build-and-push:
     runs-on: ubuntu-latest
@@ -77,8 +85,14 @@ jobs:
         username: ahuservices
         password: ${{ secrets.DOCKER_TOKEN }}
 
-    - name: Build and push multi-arch Docker image
+    - name: Download images from build-and-test job
+      run: |
+        docker pull ahuservices/cs-image-tools:${{ github.sha }}-amd64
+        docker pull ahuservices/cs-image-tools:${{ github.sha }}-arm64
+
+    - name: Create and push multi-arch Docker image
       run: |
         docker buildx create --use --name mybuilder
         docker buildx inspect mybuilder --bootstrap
-        docker buildx build --platform linux/amd64,linux/arm64 --tag ahuservices/cs-image-tools:latest --tag ahuservices/cs-image-tools:${{ github.ref_name }} --push .
+        docker buildx imagetools create --tag ahuservices/cs-image-tools:latest --tag ahuservices/cs-image-tools:${{ github.ref_name }} ahuservices/cs-image-tools:${{ github.sha }}-amd64 ahuservices/cs-image-tools:${{ github.sha }}-arm64
+        docker buildx imagetools inspect ahuservices/cs-image-tools:latest
