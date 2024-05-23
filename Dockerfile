@@ -126,7 +126,7 @@ COPY --from=ffmpeg-builder /ffmpeg-build/ /TOOLS/
 ### Final image
 FROM debian:trixie-slim as final
 RUN apt-get update && apt-get remove -y wpasupplicant && apt-get upgrade -y && \
-    apt-get install -y wget pkg-config wkhtmltopdf pngquant \
+    apt-get install -y iproute2 wget pkg-config wkhtmltopdf pngquant \
     libraqm-dev libfftw3-dev libtool python3 python3-pip ca-certificates
 
 # Copy binaries from builder stages
@@ -150,16 +150,24 @@ RUN ldconfig; \
 COPY --from=image-tools-combined /opt/corpus/ /opt/corpus/
 # Add entrypoint script
 COPY entrypoint.py /usr/local/bin/entrypoint.py
+# Add health check script
+COPY health_check.py /usr/local/bin/health_check.py
+
 
 ### Test Stage
 FROM final as test
 RUN pip3 install pytest --break-system-packages
 COPY tests/test_installation.py /test_installation.py
+COPY tests/test_health_check.py /test_health_check.py
 
-CMD ["pytest", "-v", "/test_installation.py"]
+CMD ["pytest", "-v", "/test_installation.py", "/test_health_check.py"]
 
 ### Release
 FROM final
 # Expose Service-Client Ports
 EXPOSE 30543 30544 30545
+# Define health check
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD python3 /usr/local/bin/health_check.py
+
+# Define entrypoint to configure and start Service-Client
 ENTRYPOINT ["python3", "/usr/local/bin/entrypoint.py"]
