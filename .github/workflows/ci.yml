@@ -31,7 +31,7 @@ jobs:
       if: matrix.os == 'macos-latest'
       run: |
         brew install --cask docker
-        brew services start docker
+        /usr/bin/osascript -e 'tell application "Docker" to activate'
         while ! docker system info > /dev/null 2>&1; do
           echo "Waiting for Docker to start..."
           sleep 5
