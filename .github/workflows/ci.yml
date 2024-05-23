@@ -32,7 +32,7 @@ jobs:
       run: |
         brew install --cask docker
         open /Applications/Docker.app
-        docker system info
+        while ! docker system info; do sleep 10; done
   
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
