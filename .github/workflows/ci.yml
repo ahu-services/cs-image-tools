@@ -35,9 +35,17 @@ jobs:
         username: ahuservices
         password: ${{ secrets.DOCKER_TOKEN }}
 
+    - name: Set up Docker
+      if: matrix.os == 'macos-latest'
+      run: |
+        brew install --cask docker
+        open /Applications/Docker.app
+        while ! docker system info > /dev/null 2>&1; do sleep 1; done
+
     - name: Build Docker image
       id: build
       run: |
+        docker buildx create --use
         docker buildx build \
           --platform linux/${{ matrix.arch }} \
           --tag ahuservices/cs-image-tools:${{ matrix.arch }}-${{ github.sha }} \
@@ -62,8 +70,8 @@ jobs:
     - name: Log in to Docker Hub
       uses: docker/login-action@v2
       with:
-        username: ${{ secrets.DOCKER_USERNAME }}
-        password: ${{ secrets.DOCKER_PASSWORD }}
+        username: ahuservices
+        password: ${{ secrets.DOCKER_TOKEN }}
 
     - name: Combine and push multi-arch image
       run: |
