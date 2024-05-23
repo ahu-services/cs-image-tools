@@ -32,7 +32,7 @@ jobs:
       run: |
         brew install --cask docker
         open /Applications/Docker.app
-        while ! docker system info > /dev/null 2>&1; do sleep 1; done      
+        docker system info
   
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
@@ -47,7 +47,7 @@ jobs:
       id: build
       run: |
         docker buildx create --use
-        docker buildx build \
+        docker buildx build  --target test \
           --platform linux/${{ matrix.arch }} \
           --tag ahuservices/cs-image-tools:${{ matrix.arch }}-${{ github.sha }} \
           --load \
