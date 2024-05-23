@@ -18,7 +18,7 @@ jobs:
         os: [macos-13, ubuntu-latest]
         arch: [arm64, amd64]
         include:
-          - os: macos-latest
+          - os: macos-13
             arch: arm64
           - os: ubuntu-latest
             arch: amd64
