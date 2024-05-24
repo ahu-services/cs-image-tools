@@ -16,7 +16,7 @@ RUN apt-get install ca-certificates
 
 ### Build Ghostscript
 FROM debian-builder AS ghostscript-builder
-ARG GHOSTSCRIPT_VERSION=10.03.0
+ARG GHOSTSCRIPT_VERSION=10.03.1
 
 # Download and build Ghostscript
 WORKDIR /tmp
@@ -67,7 +67,7 @@ RUN wget https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz \
 
 ### Build ExifTool
 FROM debian-builder AS exif-builder
-ARG EXIF_VERSION=12.84
+ARG EXIF_VERSION=12.85
 
 # Download and build ExifTool
 WORKDIR /tmp

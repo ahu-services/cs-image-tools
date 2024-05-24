@@ -23,8 +23,8 @@ Before you begin, ensure you have Docker installed on your system. You can downl
 |Tool         |Version |
 |-------------|--------|
 |ImageMagick  |7.1.1-32|
-|Ghostscript  |10.03.0 |
-|ExifTool     |12.84   |
+|Ghostscript  |10.03.1 |
+|ExifTool     |12.85   |
 |FFmpeg       |7.0     |
 |pngquant     |2.18.0  |
 |wkhtmltoimage|0.12.6  |
