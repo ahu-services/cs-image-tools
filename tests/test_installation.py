@@ -23,12 +23,12 @@ def test_imagemagick_installed():
 def test_ghostscript_installed():
     gs_path = path_map['ghostscript'][1]
     result = subprocess.run([gs_path, '--version'], capture_output=True, text=True)
-    assert '10.03.0' in result.stdout
+    assert '10.03.1' in result.stdout
 
 def test_exiftool_installed():
     exiftool_path = path_map['exiftool'][1]
     result = subprocess.run([exiftool_path, '-ver'], capture_output=True, text=True)
-    assert '12.84' in result.stdout
+    assert '12.85' in result.stdout
 
 def test_ffmpeg_installed():
     ffmpeg_path = path_map['ffmpeg'][1]
