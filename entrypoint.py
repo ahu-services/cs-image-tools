@@ -7,7 +7,17 @@ import sys
 import subprocess
 import signal
 import xml.etree.ElementTree as ET
-import urllib.request
+import urllib3
+from urllib3.exceptions import HTTPError
+
+def str_to_bool(value):
+    """
+    Convert a string to a boolean.
+    Returns True for 'true', '1', 't', 'y', 'yes' (case insensitive).
+    Returns False for 'false', '0', 'f', 'n', 'no' (case insensitive).
+    Defaults to False for any other value.
+    """
+    return value.lower() in ['true', '1', 't', 'y', 'yes']
 
 def download_unpack(url, output_path):
     """
@@ -108,24 +118,52 @@ def update_facility_paths(facility, key, office_url):
 
     # Handle specific facilities like 'office'
     if key == "office":
-        handle_office_facility(facility, office_url)
+        office_validate_certs = str_to_bool(os.getenv('OFFICE_VALIDATE_CERTS', 'true'))
+        handle_office_facility(facility, office_url, validate_certs=office_validate_certs)
 
-def handle_office_facility(facility, office_url):
+def handle_office_facility(facility, office_url, validate_certs=True):
     """
     Configures the office facility based on the availability of a given URL.
     Args:
     facility (ET.Element): XML element that contains office facility configuration.
     office_url (str): URL to test for office service availability.
+    validate_certs (bool): Whether to validate SSL certificates.
     """
     if office_url:
         try:
-            response = urllib.request.urlopen(office_url, timeout=10)
+            http = urllib3.PoolManager(cert_reqs='CERT_REQUIRED' if validate_certs else 'CERT_NONE')
+            # Create a Multipart Encoder
+            fields = {
+                'data': ('test.txt', "foobar", 'text/plain')
+            }
+
+            # Encode the fields
+            encoded_fields = urllib3.filepost.encode_multipart_formdata(fields)
+            body, content_type = encoded_fields
+
+            headers = {
+                'Content-Type': content_type
+            }
+
+            response = http.request(
+                'POST',
+                office_url,
+                body=body,
+                headers=headers,
+                timeout=10,
+                retries=False
+            )
+
             if response.status == 200:
                 facility.find(".//path[@key='@@OFFICE@@']").set('port', office_url)
+                print(f"Successesfully tested ${office_url}, facility enabled.")
             else:
-                raise Exception("Non-200 status code received")
-        except Exception as e:
+                raise Exception(f"Non-200 status code received: {response.status}")
+        except HTTPError as e:
             print(f"Failed to connect to OFFICE_URL: {e}")
+            facility.set('enabled', 'false')
+        except Exception as e:
+            print(f"Unexpected error: {e}")
             facility.set('enabled', 'false')
     else:
         facility.set('enabled', 'false')

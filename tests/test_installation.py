@@ -128,15 +128,25 @@ def test_configure_xml(mock_et_parse):
     assert mock_root.find.call_count > 0
     assert mock_facilities.attrib['instances'] == '4'
 
-@patch('urllib.request.urlopen')
-def test_handle_office_facility(mock_urlopen):
+@patch('urllib3.PoolManager.request')
+def test_handle_office_facility(mock_request):
     mock_facility = mock.Mock()
     mock_facility.find.return_value = mock.Mock()
     mock_response = mock.Mock()
     mock_response.status = 200
-    mock_urlopen.return_value = mock_response
+    mock_request.return_value = mock_response
 
-    entrypoint.handle_office_facility(mock_facility, 'http://office.url')
+    office_url = 'http://office.url'
+    file_content = 'This is a test file content'
 
-    mock_urlopen.assert_called_once_with('http://office.url', timeout=10)
-    mock_facility.find.return_value.set.assert_called_once_with('port', 'http://office.url')
+    entrypoint.handle_office_facility(mock_facility, office_url, file_content)
+
+    mock_request.assert_called_once_with(
+        'POST',
+        office_url,
+        body=mock.ANY,
+        headers={'Content-Type': mock.ANY},
+        timeout=10,
+        retries=False
+    )
+    mock_facility.find.return_value.set.assert_called_once_with('port', office_url)
