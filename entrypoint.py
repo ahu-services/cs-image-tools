@@ -7,8 +7,10 @@ import sys
 import subprocess
 import signal
 import xml.etree.ElementTree as ET
+from xml.dom import minidom
 import urllib3
 from urllib3.exceptions import HTTPError
+import json
 
 def str_to_bool(value):
     """
@@ -84,6 +86,8 @@ def configure_xml(svc_host, svc_user):
     for facility in facilities.findall('.//facility'):
         key = facility.attrib['key']
         update_facility_paths(facility, key, office_url)
+
+    update_volumes_configuration("/opt/corpus/censhare/censhare-Service-Client/config/hosts.xml")
 
     tree.write(path)
     print("XML configuration updated.")
@@ -167,7 +171,6 @@ def handle_office_facility(facility, office_url, validate_certs=True):
             facility.set('enabled', 'false')
     else:
         facility.set('enabled', 'false')
-
 
 def setup_icc_profiles(source_dir, target_dir):
     """
@@ -272,6 +275,51 @@ def follow_log_file(log_file_path):
                 time.sleep(0.1)  # Sleep briefly to avoid busy loop
                 continue
             print(line.strip(), flush=True)
+
+def update_volumes_configuration(hosts_xml_path):
+    """
+    Updates the volumes configuration in the hosts.xml file based on provided environment variable.
+
+    Args:
+    hosts_xml_path (str): Path to the hosts.xml file.
+    """
+    volumes_info = os.getenv('VOLUMES_INFO')
+    if not volumes_info:
+        print("VOLUMES_INFO environment variable is not set.")
+        return
+
+    volumes_info = json.loads(volumes_info)
+    tree = ET.parse(hosts_xml_path)
+    root = tree.getroot()
+
+    # Find and remove existing volumes elements
+    for host in root.findall('.//host'):
+        for volumes in host.findall('volumes'):
+            host.remove(volumes)
+
+        # Ensure <censhare-vfs use="0"/> element is present
+        if host.find('censhare-vfs') is None:
+            ET.SubElement(host, 'censhare-vfs', {'use': '0'})
+
+        # Add new volumes element to the host
+        volumes_element = ET.SubElement(host, 'volumes')
+        for fs_name, attributes in volumes_info.items():
+            volume_element = ET.SubElement(volumes_element, 'volume')
+            volume_element.set('filesystemname', fs_name)
+            for attr_key, attr_value in attributes.items():
+                if isinstance(attr_value, bool):
+                    attr_value = str(attr_value).lower()
+                volume_element.set(attr_key, str(attr_value))
+
+    # Pretty-print the XML
+    xml_str = ET.tostring(root, encoding='utf-8')
+    parsed = minidom.parseString(xml_str)
+    pretty_xml_str = parsed.toprettyxml(indent="  ")
+
+    with open(hosts_xml_path, 'w') as f:
+        f.write(pretty_xml_str)
+    
+    print("Volumes configuration updated.")
 
 if __name__ == "__main__":
     # Stop censhare Client on SIGTERM

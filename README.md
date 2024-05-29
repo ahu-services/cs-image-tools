@@ -82,6 +82,33 @@ docker run -d --name csclient1 \
   cs-image-tools:v1.0
 ```
 
+### Volume Configuration with VOLUMES_INFO
+
+To dynamically configure volume information, use the VOLUMES_INFO environment variable to provide a JSON string with volume details. This will completely replace the existing volumes section in the hosts.xml file.
+
+#### Example VOLUMES_INFO
+
+```yaml
+VOLUMES_INFO: >
+  {
+    "assets": {"physicalurl": "file:///opt/corpus/work/assets/", "filestreaming": true},
+    "assets-temp": {"physicalurl": "file:///opt/corpus/work/assets-temp/", "filestreaming": true},
+    "assets-s3": {"endpoint": "s3.amazon.com", "bucket-name": "assets-s3", "secret": "foobar"},
+    "temp": {"physicalurl": "file:///opt/corpus/work/temp/", "filestreaming": false}
+  }
+```
+
+#### Docker Run Command with VOLUMES_INFO
+
+```bash
+docker run -d --name csclient1 \
+  -e REPO_USER=repo_user -e REPO_PASS=repo_password -e VERSION=2023.1.1 \
+  -e SVC_USER=user -e SVC_PASS=password -e SVC_HOST=host.example.com \
+  -e VOLUMES_INFO='{"assets": {"physicalurl": "file:///assets/", "filestreaming": false}, "assets-temp": {"physicalurl": "file:///assets/assets-temp/", "filestreaming": false}, "assets-s3": {"endpoint": "s3.amazon.com", "bucket-name": "assets-s3", "secret": "foobar"}, "temp": {"physicalurl": "file:///opt/corpus/work/temp/", "filestreaming": true}}' \
+  -v /opt/corpus/work/assets:/assets
+  cs-image-tools:v1.0
+```
+
 ## Running the Container together with collabora office to create previews for office documents
 
 To use a service for creating Office document previews, here is an example docker-compose:
@@ -127,6 +154,7 @@ These variables affect the runtime behavior of the Docker container:
 - `SVC_INSTANCES`: Defines the number of instances for parallel processing within the service client. Default is `4`.
 - `OFFICE_URL`: URL of the office service for document conversion services. If not set or the service is unreachable, the related functionality is disabled.
 - `OFFICE_VALIDATE_CERTS`: If the OFFICE_URL uses SSL, the certificates are validated. To turn validation off, set the `OFFICE_VALIDATE_CERTS` to `false`.
+- `VOLUMES_INFO`: A JSON string defining the volume configurations, including physicalurl and filestreaming status for each volume.
 - `REPO_USER`, `REPO_PASS`, and `VERSION`: These can also be provided at runtime to download and configure the censhare-Service-Client if not done at build time.
 
 ## Customization

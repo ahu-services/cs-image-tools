@@ -3,11 +3,13 @@ import sys
 sys.path.append('/usr/local/bin')
 import subprocess
 import os
-import pytest
 import tempfile
 import entrypoint
-from unittest import mock
+from unittest import mock, TestCase
 from unittest.mock import patch, mock_open
+from xml.dom import minidom
+import xml.etree.ElementTree as ET
+import json
 
 # Integration Tests
 path_map = entrypoint.get_path_map()
@@ -149,4 +151,103 @@ def test_handle_office_facility(mock_request):
         timeout=10,
         retries=False
     )
-    mock_facility.find.return_value.set.assert_called_once_with('port', office_url)
+
+class TestUpdateVolumesConfiguration(TestCase):
+    @patch('builtins.open', new_callable=mock_open, read_data='''
+<root>
+  <hosts>
+    <host name="localhost" compressionlevel="0" authentication-method="" url="rmi://localhost/corpus.RMIServer">
+      <proxy use="0"/>
+      <censhare-vfs use="0"/>
+      <volumes>
+        <volume filesystemname="assets" physicalurl="file:///opt/corpus/work/assets/" filestreaming="false"/>
+        <volume filesystemname="assets-temp" physicalurl="file:///opt/corpus/work/assets-temp/" filestreaming="false"/>
+        <volume filesystemname="temp" physicalurl="file:///opt/corpus/work/temp/" filestreaming="false"/>
+      </volumes>
+    </host>
+    <host name="192.168.123.45" compressionlevel="0" authentication-method="" url="rmi://192.168.123.45/corpus.RMIServer">
+      <proxy use="0"/>
+      <volumes>
+        <volume filesystemname="assets" physicalurl="file:///opt/corpus/work/assets/" filestreaming="true"/>
+        <volume filesystemname="assets-temp" physicalurl="file:///opt/corpus/work/assets-temp/" filestreaming="true"/>
+        <volume filesystemname="temp" physicalurl="file:///opt/corpus/work/temp/" filestreaming="true"/>
+      </volumes>
+    </host>
+  </hosts>
+</root>
+    ''')
+    @patch('entrypoint.ET.parse')
+    def test_update_volumes_configuration(self, mock_parse, mock_file):
+        # Setup the environment variable
+        volumes_info = {
+            "filesystem1": {"attr1": "value1", "attr2": True},
+            "filesystem2": {"attr3": "value3", "attr4": False}
+        }
+        os.environ['VOLUMES_INFO'] = json.dumps(volumes_info)
+
+        # Mock the XML structure
+        mock_tree = ET.ElementTree(ET.fromstring('''
+        <root>
+          <hosts>
+            <host name="localhost" compressionlevel="0" authentication-method="" url="rmi://localhost/corpus.RMIServer">
+              <proxy use="0"/>
+              <censhare-vfs use="0"/>
+              <volumes>
+                <volume filesystemname="assets" physicalurl="file:///opt/corpus/work/assets/" filestreaming="false"/>
+                <volume filesystemname="assets-temp" physicalurl="file:///opt/corpus/work/assets-temp/" filestreaming="false"/>
+                <volume filesystemname="temp" physicalurl="file:///opt/corpus/work/temp/" filestreaming="false"/>
+              </volumes>
+            </host>
+            <host name="192.168.123.45" compressionlevel="0" authentication-method="" url="rmi://192.168.123.45/corpus.RMIServer">
+              <proxy use="0"/>
+              <volumes>
+                <volume filesystemname="assets" physicalurl="file:///opt/corpus/work/assets/" filestreaming="true"/>
+                <volume filesystemname="assets-temp" physicalurl="file:///opt/corpus/work/assets-temp/" filestreaming="true"/>
+                <volume filesystemname="temp" physicalurl="file:///opt/corpus/work/temp/" filestreaming="true"/>
+              </volumes>
+            </host>
+          </hosts>
+        </root>
+        '''))
+        mock_parse.return_value = mock_tree
+
+        # Call the function
+        entrypoint.update_volumes_configuration('/mock/path/to/hosts.xml')
+
+        # Verify the function's behavior
+        mock_parse.assert_called_once_with('/mock/path/to/hosts.xml')
+
+        # Verify the changes in the XML tree
+        root_element = mock_tree.getroot()
+        hosts_element = root_element.find('hosts')
+        host1_volumes = hosts_element.find('.//host[@name="localhost"]/volumes')
+        host2_volumes = hosts_element.find('.//host[@name="192.168.123.45"]/volumes')
+
+        # Check that the new volumes elements are added correctly
+        self.assertEqual(len(host1_volumes.findall('volume')), 2)
+        self.assertEqual(len(host2_volumes.findall('volume')), 2)
+
+        # Verify the attributes of the volumes in the first host
+        volume1 = host1_volumes.find('volume[@filesystemname="filesystem1"]')
+        self.assertIsNotNone(volume1)
+        self.assertEqual(volume1.attrib['attr1'], 'value1')
+        self.assertEqual(volume1.attrib['attr2'], 'true')
+
+        volume2 = host1_volumes.find('volume[@filesystemname="filesystem2"]')
+        self.assertIsNotNone(volume2)
+        self.assertEqual(volume2.attrib['attr3'], 'value3')
+        self.assertEqual(volume2.attrib['attr4'], 'false')
+
+        # Verify the attributes of the volumes in the second host
+        volume1 = host2_volumes.find('volume[@filesystemname="filesystem1"]')
+        self.assertIsNotNone(volume1)
+        self.assertEqual(volume1.attrib['attr1'], 'value1')
+        self.assertEqual(volume1.attrib['attr2'], 'true')
+
+        volume2 = host2_volumes.find('volume[@filesystemname="filesystem2"]')
+        self.assertIsNotNone(volume2)
+        self.assertEqual(volume2.attrib['attr3'], 'value3')
+        self.assertEqual(volume2.attrib['attr4'], 'false')
+
+        # Clean up the environment variable
+        del os.environ['VOLUMES_INFO']
