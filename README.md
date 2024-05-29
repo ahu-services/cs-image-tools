@@ -126,6 +126,7 @@ These variables affect the runtime behavior of the Docker container:
 - `SVC_HOST`: Hostname or IP address where the censhare service client connects. This setting is crucial for network communication setup.
 - `SVC_INSTANCES`: Defines the number of instances for parallel processing within the service client. Default is `4`.
 - `OFFICE_URL`: URL of the office service for document conversion services. If not set or the service is unreachable, the related functionality is disabled.
+- `OFFICE_VALIDATE_CERTS`: If the OFFICE_URL uses SSL, the certificates are validated. To turn validation off, set the `OFFICE_VALIDATE_CERTS` to `false`.
 - `REPO_USER`, `REPO_PASS`, and `VERSION`: These can also be provided at runtime to download and configure the censhare-Service-Client if not done at build time.
 
 ## Customization
