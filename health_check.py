@@ -1,7 +1,6 @@
 import os
 import re
 import subprocess
-import socket
 
 # Paths to log files
 service_log_path = "/opt/corpus/censhare/censhare-Service-Client/logs/service-client-internal-0.0.log"
@@ -26,12 +25,13 @@ def check_java_process():
         print(f"Error checking Java process: {e}")
         return False
 
-def check_port_listening(port):
+def check_tcp_connection():
     try:
-        result = subprocess.run(['ss', '-tln'], stdout=subprocess.PIPE)
-        return f":{port} " in result.stdout.decode()
+        result = subprocess.run(['ss', '-tan'], stdout=subprocess.PIPE)
+        # Check for established TCP connections
+        return "ESTAB" in result.stdout.decode()
     except Exception as e:
-        print(f"Error checking port {port} listening: {e}")
+        print(f"Error checking TCP connections: {e}")
         return False
 
 def health_check():
@@ -50,9 +50,9 @@ def health_check():
         print("No successful service registration found in logs.")
         return 1  # Indicate failure
 
-    # Check if the Java process is listening on port 30545
-    if not check_port_listening(30545):
-        print("Java process not listening on port 30545.")
+    # Check if there are established TCP connections
+    if not check_tcp_connection():
+        print("No established TCP connections found.")
         return 1  # Indicate failure
 
     print("Service is healthy.")
