@@ -18,7 +18,7 @@ def test_imagemagick_installed():
     convert_path = path_map['imagemagick'][1]
     result = subprocess.run([convert_path, '--version'], capture_output=True, text=True)
     assert 'ImageMagick' in result.stdout
-    assert '7.1.1-32' in result.stdout
+    assert '7.1.1-34' in result.stdout
     assert 'Features: Cipher DPC HDRI Modules OpenMP(4.5)' in result.stdout
     assert 'Delegates (built-in): bzlib cairo djvu fftw fontconfig freetype gvc heic jbig jng jp2 jpeg lcms ltdl lzma openexr pangocairo png raqm raw rsvg tiff webp wmf xml zip zlib zstd' in result.stdout
 
@@ -30,12 +30,12 @@ def test_ghostscript_installed():
 def test_exiftool_installed():
     exiftool_path = path_map['exiftool'][1]
     result = subprocess.run([exiftool_path, '-ver'], capture_output=True, text=True)
-    assert '12.85' in result.stdout
+    assert '12.87' in result.stdout
 
 def test_ffmpeg_installed():
     ffmpeg_path = path_map['ffmpeg'][1]
     result = subprocess.run([ffmpeg_path, '-version'], capture_output=True, text=True)
-    assert 'ffmpeg version 7.0' in result.stdout
+    assert 'ffmpeg version 7.0.1' in result.stdout
 
 def test_wkhtmltoimage_installed():
     wkhtmltoimage_path = path_map['wkhtmltoimage'][1]
