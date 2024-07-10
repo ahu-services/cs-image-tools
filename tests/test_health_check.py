@@ -36,18 +36,18 @@ class TestHealthCheck(unittest.TestCase):
         self.assertFalse(health_check.check_java_process())
 
     @patch('subprocess.run')
-    def test_check_port_listening(self, mock_subprocess):
-        mock_subprocess.return_value.stdout = b"LISTEN 0      128         0.0.0.0:30545       0.0.0.0:*\n"
-        self.assertTrue(health_check.check_port_listening(30545))
+    def test_check_tcp_connection(self, mock_subprocess):
+        mock_subprocess.return_value.stdout = b"ESTAB 0      0          192.168.1.2:30545       192.168.1.1:12345\n"
+        self.assertTrue(health_check.check_tcp_connection())
 
     @patch('subprocess.run')
-    def test_check_port_not_listening(self, mock_subprocess):
+    def test_check_tcp_no_connection(self, mock_subprocess):
         mock_subprocess.return_value.stdout = b""
-        self.assertFalse(health_check.check_port_listening(30545))
+        self.assertFalse(health_check.check_tcp_connection())
 
     @patch('health_check.check_java_process')
     @patch('health_check.check_log_file')
-    @patch('health_check.check_port_listening')
+    @patch('health_check.check_tcp_connection')
     def test_health_check_successful(self, mock_port, mock_log_file, mock_java_process):
         mock_java_process.return_value = True
         mock_log_file.side_effect = [True, True]
@@ -57,7 +57,7 @@ class TestHealthCheck(unittest.TestCase):
 
     @patch('health_check.check_java_process')
     @patch('health_check.check_log_file')
-    @patch('health_check.check_port_listening')
+    @patch('health_check.check_tcp_connection')
     def test_health_check_failure(self, mock_port, mock_log_file, mock_java_process):
         mock_java_process.return_value = False
         mock_log_file.side_effect = [False, False]
