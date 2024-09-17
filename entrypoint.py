@@ -221,12 +221,34 @@ def run_as_corpus(command):
 
 def stop_service_client():
     """
-    Stops the censhare service client by greacefully killing the Java process.
+    Stops the censhare service client by gracefully terminating the Java process.
     """
     print("Stopping the censhare service client...")
-    stop_command = "kill $(jps | grep ServiceClient | cut -f 1 -d ' '); sleep 1"
-    subprocess.run(stop_command, shell=True, executable='/bin/bash', text=True)
-    print("Service client stopped.")
+
+    # Find the process ID of the ServiceClient
+    pid_command = "jps | grep ServiceClient | cut -f 1 -d ' '"
+    pid = subprocess.check_output(pid_command, shell=True, executable='/bin/bash', text=True).strip()
+
+    if pid:
+        # Send SIGTERM to the process
+        stop_command = f"kill -TERM {pid}"
+        subprocess.run(stop_command, shell=True, executable='/bin/bash', text=True)
+
+        # Wait for the process to terminate
+        timeout = 120
+        while timeout > 0:
+            if not os.path.exists(f"/proc/{pid}"):
+                print("Service client stopped.")
+                break
+            time.sleep(1)
+            timeout -= 1
+
+        if timeout == 0:
+            print("Timeout reached. Forcefully terminating the service client...")
+            subprocess.run(f"kill -9 {pid}", shell=True, executable='/bin/bash', text=True)
+            print("Service client forcefully stopped.")
+    else:
+        print("No ServiceClient process found.")
 
 def signal_handler(sig, frame):
     """
