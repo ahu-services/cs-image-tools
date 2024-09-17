@@ -51,7 +51,7 @@ def test_pngquant_installed():
 def test_get_path_map():
     path_map = entrypoint.get_path_map()
     assert 'imagemagick' in path_map
-    assert path_map['imagemagick'] == ('@@CONVERT@@', '/usr/local/bin/convert', '@@COMPOSITE@@', '/usr/local/bin/composite')
+    assert path_map['imagemagick'] == ('@@CONVERT@@', '/usr/local/bin/magick', '@@COMPOSITE@@', '/usr/local/bin/composite')
 
 @patch('requests.get')
 @patch('tarfile.open')

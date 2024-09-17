@@ -127,7 +127,7 @@ COPY --from=ffmpeg-builder /ffmpeg-build/ /TOOLS/
 FROM debian:trixie-slim as final
 RUN apt-get update && apt-get remove -y wpasupplicant && apt-get upgrade -y && \
     apt-get install -y iproute2 wget pkg-config wkhtmltopdf pngquant \
-    libraqm-dev libfftw3-dev libtool python3 python3-pip ca-certificates
+    libraqm-dev libfftw3-dev libtool python3 python3-pip ca-certificates java-common
 
 # Copy binaries from builder stages
 COPY --from=image-tools-combined /TOOLS/ /

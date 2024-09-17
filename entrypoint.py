@@ -94,7 +94,7 @@ def configure_xml(svc_host, svc_user):
 
 def get_path_map():
     return {
-        'imagemagick': ('@@CONVERT@@', '/usr/local/bin/convert', '@@COMPOSITE@@', '/usr/local/bin/composite'),
+        'imagemagick': ('@@CONVERT@@', '/usr/local/bin/magick', '@@COMPOSITE@@', '/usr/local/bin/composite'),
         'exiftool': ('@@EXIFTOOL@@', '/usr/local/bin/exiftool'),
         'ghostscript': ('@@GS@@', '/usr/local/bin/gs'),
         'wkhtmltoimage': ('@@HTML2IMG@@', '/usr/bin/wkhtmltoimage'),
