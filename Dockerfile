@@ -67,7 +67,7 @@ RUN wget https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz \
 
 ### Build ExifTool
 FROM debian-builder AS exif-builder
-ARG EXIF_VERSION=12.87
+ARG EXIF_VERSION=12.98
 
 # Download and build ExifTool
 WORKDIR /tmp
