@@ -55,7 +55,7 @@ RUN tar -xzvf ImageMagick-${IMAGEMAGICK_VERSION}.tar.gz \
 
 ### Build ffmpeg
 FROM debian-builder AS ffmpeg-builder
-ARG FFMPEG_VERSION=7.0.1
+ARG FFMPEG_VERSION=7.1
 
 # Download and build ffmpeg
 WORKDIR /tmp
