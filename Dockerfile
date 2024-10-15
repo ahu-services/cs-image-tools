@@ -29,7 +29,7 @@ RUN wget https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download
 
 ### Build ImageMagick
 FROM debian-builder AS im-builder
-ARG IMAGEMAGICK_VERSION=7.1.1-34
+ARG IMAGEMAGICK_VERSION=7.1.1-39
 
 # Download ImageMagick
 WORKDIR /tmp
