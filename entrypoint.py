@@ -138,7 +138,7 @@ def handle_office_facility(facility, office_url, validate_certs=True):
             http = urllib3.PoolManager(cert_reqs='CERT_REQUIRED' if validate_certs else 'CERT_NONE')
             # Create a Multipart Encoder
             fields = {
-                'data': ('test.txt', "foobar", 'text/plain')
+                'file': ('test.txt', "foobar", 'text/plain')
             }
 
             # Encode the fields
