@@ -234,17 +234,54 @@ class TestEntrypoint(unittest.TestCase):
 
         # Further assertions can be added to check XML modifications
 
-    @patch('entrypoint.open', new_callable=mock_open, read_data='9223372036854771712')
-    @patch('entrypoint.psutil.virtual_memory')
-    def test_get_container_memory_limit(self, mock_virtual_memory, mock_file):
-        # Mock psutil to return a specific total memory
-        mock_virtual_memory.return_value = MagicMock(total=16 * 1024 * 1024 * 1024)  # 16GB
+        @patch('entrypoint.os.getenv', return_value='4096')
+        def test_get_container_memory_limit_env_var_valid(self, mock_getenv):
+            # Scenario 1: CONTAINER_MEMORY_LIMIT environment variable is set to a valid integer value
+            mem_limit = get_container_memory_limit()
+            self.assertEqual(mem_limit, 4096 * 1024 * 1024)  # 4096 MB in bytes
 
-        # Call the function
-        mem_limit = get_container_memory_limit()
+        @patch('entrypoint.os.getenv', return_value='invalid_value')
+        @patch('entrypoint.open', side_effect=FileNotFoundError())
+        @patch('entrypoint.psutil.virtual_memory')
+        def test_get_container_memory_limit_env_var_invalid(self, mock_virtual_memory, mock_open, mock_getenv):
+            # Scenario 2: CONTAINER_MEMORY_LIMIT environment variable is set to an invalid value
+            # Mock psutil to return a specific total memory
+            mock_virtual_memory.return_value = MagicMock(total=16 * 1024 * 1024 * 1024)  # 16GB
+            # Call the function
+            mem_limit = get_container_memory_limit()
+            # Assert that it falls back to psutil.virtual_memory().total
+            self.assertEqual(mem_limit, 16 * 1024 * 1024 * 1024)
 
-        # Assert that the memory limit was set to 8GB due to the cgroup limit
-        self.assertEqual(mem_limit, 8 * 1024 * 1024 * 1024)
+        @patch('entrypoint.os.getenv', return_value=None)
+        @patch('entrypoint.open', new_callable=mock_open, read_data='4294967296')  # 4GB in bytes
+        def test_get_container_memory_limit_cgroup_v2(self, mock_file, mock_getenv):
+            # Scenario 3: CONTAINER_MEMORY_LIMIT is not set, cgroup v2 file exists with a valid value
+            mem_limit = get_container_memory_limit()
+            self.assertEqual(mem_limit, 4294967296)
+
+        @patch('entrypoint.os.getenv', return_value=None)
+        @patch('entrypoint.open', new_callable=mock_open, read_data='max')
+        @patch('entrypoint.psutil.virtual_memory')
+        def test_get_container_memory_limit_cgroup_v2_max(self, mock_virtual_memory, mock_file, mock_getenv):
+            # Scenario 4: cgroup v2 file says 'max' (no limit)
+            # Mock psutil to return a specific total memory
+            mock_virtual_memory.return_value = MagicMock(total=32 * 1024 * 1024 * 1024)  # 32GB
+            # Call the function
+            mem_limit = get_container_memory_limit()
+            # Assert that it falls back to psutil.virtual_memory().total
+            self.assertEqual(mem_limit, 32 * 1024 * 1024 * 1024)
+
+        @patch('entrypoint.os.getenv', return_value=None)
+        @patch('entrypoint.open', side_effect=FileNotFoundError())
+        @patch('entrypoint.psutil.virtual_memory')
+        def test_get_container_memory_limit_no_cgroup(self, mock_virtual_memory, mock_open, mock_getenv):
+            # Scenario 5: cgroup files do not exist, fallback to psutil
+            # Mock psutil to return a specific total memory
+            mock_virtual_memory.return_value = MagicMock(total=64 * 1024 * 1024 * 1024)  # 64GB
+            # Call the function
+            mem_limit = get_container_memory_limit()
+            # Assert that it uses psutil.virtual_memory().total
+            self.assertEqual(mem_limit, 64 * 1024 * 1024 * 1024)
 
     @patch('entrypoint.os.cpu_count', return_value=4)
     @patch('entrypoint.os.getenv', side_effect=lambda k, default=None: {'IMAGEMAGICK_BUFFER_PERCENTAGE': '0.2'}.get(k, default))

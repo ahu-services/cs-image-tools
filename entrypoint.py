@@ -363,16 +363,52 @@ def update_volumes_configuration(hosts_xml_path):
 def get_container_memory_limit():
     """
     Retrieves the memory limit set for the container in bytes.
+    Works with both cgroup v1 and v2, and handles ECS Fargate environments.
     """
+    import os
+
+    # Try cgroup v2 first
+    try:
+        with open('/sys/fs/cgroup/memory.max', 'r') as f:
+            mem_limit_str = f.read().strip()
+            if mem_limit_str.isdigit():
+                mem_limit = int(mem_limit_str)
+            elif mem_limit_str == 'max':
+                # No limit is set
+                mem_limit = psutil.virtual_memory().total
+            else:
+                raise ValueError(f"Unexpected memory.max value: {mem_limit_str}")
+            return mem_limit
+    except FileNotFoundError:
+        pass  # Not cgroup v2
+
+    # Try cgroup v1
     try:
         with open('/sys/fs/cgroup/memory/memory.limit_in_bytes', 'r') as f:
             mem_limit = int(f.read().strip())
-            # If no limit is set, Docker uses a very high number. We'll cap it to a reasonable default, e.g., 8GB
-            if mem_limit >= 9223372036854771712:
-                mem_limit = 8 * 1024 * 1024 * 1024  # 6GB
+            # If no limit is set, Docker uses a very high number. We'll cap it to a reasonable default, e.g., total host memory
+            if mem_limit >= 9223372036854771712 or mem_limit == 0:
+                mem_limit = psutil.virtual_memory().total
+            return mem_limit
     except FileNotFoundError:
-        # Fallback if cgroup v2 is used or file not found
-        mem_limit = psutil.virtual_memory().total
+        pass  # Not cgroup v1
+
+    # Fallback to ECS/Fargate environment variables
+    ecs_memory_limit = os.getenv('ECS_CONTAINER_METADATA_URI_V4')
+    if ecs_memory_limit:
+        try:
+            import requests
+            response = requests.get(f"{ecs_memory_limit}/task", timeout=2)
+            if response.status_code == 200:
+                task_metadata = response.json()
+                mem_limit = int(task_metadata['Limits']['Memory']) * 1024 * 1024
+                return mem_limit
+        except Exception as e:
+            print(f"Error fetching ECS task metadata: {e}")
+            pass
+
+    # As a last resort, use psutil
+    mem_limit = psutil.virtual_memory().total
     return mem_limit
 
 def update_imagemagick_policy_xml(container_memory, svc_instances):
