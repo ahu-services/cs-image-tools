@@ -367,48 +367,58 @@ def get_container_memory_limit():
     """
     import os
 
-    # Try cgroup v2 first
+    # First, try ECS/Fargate environment variables
+    ecs_metadata_uri = os.getenv('ECS_CONTAINER_METADATA_URI_V4')
+    if ecs_metadata_uri:
+        try:
+            import requests
+            response = requests.get(f"{ecs_metadata_uri}/task", timeout=2)
+            if response.status_code == 200:
+                task_metadata = response.json()
+                mem_limit = int(task_metadata['Limits']['Memory']) * 1024 * 1024
+                print("Memory limit obtained from ECS metadata endpoint.")
+                return mem_limit
+            else:
+                print(f"Received non-200 response from ECS metadata endpoint: {response.status_code}")
+        except Exception as e:
+            print(f"Error fetching ECS task metadata: {e}")
+    else:
+        print("ECS_CONTAINER_METADATA_URI_V4 not set; skipping ECS metadata endpoint.")
+
+    # Try cgroup v2
     try:
         with open('/sys/fs/cgroup/memory.max', 'r') as f:
             mem_limit_str = f.read().strip()
             if mem_limit_str.isdigit():
                 mem_limit = int(mem_limit_str)
+                print("Memory limit obtained from cgroup v2.")
+                return mem_limit
             elif mem_limit_str == 'max':
                 # No limit is set
                 mem_limit = psutil.virtual_memory().total
+                print("No memory limit set in cgroup v2; using total system memory.")
+                return mem_limit
             else:
                 raise ValueError(f"Unexpected memory.max value: {mem_limit_str}")
-            return mem_limit
     except FileNotFoundError:
-        pass  # Not cgroup v2
+        print("cgroup v2 memory.max not found; trying cgroup v1.")
 
     # Try cgroup v1
     try:
         with open('/sys/fs/cgroup/memory/memory.limit_in_bytes', 'r') as f:
             mem_limit = int(f.read().strip())
-            # If no limit is set, Docker uses a very high number. We'll cap it to a reasonable default, e.g., total host memory
             if mem_limit >= 9223372036854771712 or mem_limit == 0:
                 mem_limit = psutil.virtual_memory().total
+                print("No memory limit set in cgroup v1; using total system memory.")
+            else:
+                print("Memory limit obtained from cgroup v1.")
             return mem_limit
     except FileNotFoundError:
-        pass  # Not cgroup v1
-
-    # Fallback to ECS/Fargate environment variables
-    ecs_memory_limit = os.getenv('ECS_CONTAINER_METADATA_URI_V4')
-    if ecs_memory_limit:
-        try:
-            import requests
-            response = requests.get(f"{ecs_memory_limit}/task", timeout=2)
-            if response.status_code == 200:
-                task_metadata = response.json()
-                mem_limit = int(task_metadata['Limits']['Memory']) * 1024 * 1024
-                return mem_limit
-        except Exception as e:
-            print(f"Error fetching ECS task metadata: {e}")
-            pass
+        print("cgroup v1 memory.limit_in_bytes not found; unable to determine memory limit from cgroups.")
 
     # As a last resort, use psutil
     mem_limit = psutil.virtual_memory().total
+    print("Memory limit obtained from psutil.virtual_memory().total.")
     return mem_limit
 
 def update_imagemagick_policy_xml(container_memory, svc_instances):
