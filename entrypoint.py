@@ -422,32 +422,33 @@ def get_container_memory_limit():
     return mem_limit
 
 def update_imagemagick_policy_xml(container_memory, svc_instances):
-    """
-    Updates ImageMagick's policy.xml with resource limits based on container memory and service instances.
-
-    Args:
-    - container_memory (int): Total memory available to the container in bytes.
-    - svc_instances (int): Number of concurrent magick processes.
-    """
-    # Define a buffer to leave some memory for other processes (e.g., 20%)
-    buffer_percentage = float(os.getenv('IMAGEMAGICK_BUFFER_PERCENTAGE', '0.2'))  # 20% by default
+    # Calculate buffer and available memory
+    buffer_percentage = float(os.getenv('IMAGEMAGICK_BUFFER_PERCENTAGE', '0.1'))  # Reduced to 10%
     buffer_memory = int(container_memory * buffer_percentage)
     available_memory = container_memory - buffer_memory
 
-    # Calculate memory per magick process
+    # Reduce the number of instances if necessary
+    svc_instances = int(os.getenv('SVC_INSTANCES', '4'))
+
+    # Calculate memory per process
     memory_per_process = int(available_memory / svc_instances)
 
-    # Set resource limits based on calculations
+    # Ensure minimum memory per process
+    min_memory_per_process = 1 * 1024 * 1024 * 1024  # 1GB
+    if memory_per_process < min_memory_per_process:
+        memory_per_process = min_memory_per_process
+
+    # Set resource limits
     memory_limit_mb = memory_per_process // (1024 * 1024)
-    map_limit_mb = (memory_per_process * 2) // (1024 * 1024)  # Map is double the memory
-    area_limit = f"{(memory_per_process // (1024 * 1024)) * 1024}KP"  # width*height <= memory_in_MB * 1024
-    disk_limit_gb = f"{(buffer_memory // (1024 * 1024 * 1024)) * 2}GB"  # disk limit is twice the buffer memory in GB
-    thread_limit = min(svc_instances, os.cpu_count() or 4)  # Use the lesser of svc_instances or CPU cores
+    map_limit_mb = memory_limit_mb * 2  # Map is double the memory
+    area_limit = f"{memory_limit_mb * 1024}KP"  # width*height <= memory_in_MB * 1024
+    disk_limit = "40GiB"  # Set higher disk limit matching increased ephemeral storage
+    thread_limit = 1  # Limit threads to reduce resource contention
 
     memory_limit = f"{memory_limit_mb}MB"
     map_limit = f"{map_limit_mb}MB"
 
-    # Path to policy.xml (adjust if different)
+    # Path to policy.xml
     policy_xml_path = "/usr/local/etc/ImageMagick-7/policy.xml"
 
     # Parse the existing policy.xml
@@ -463,7 +464,7 @@ def update_imagemagick_policy_xml(container_memory, svc_instances):
         "memory": memory_limit,
         "map": map_limit,
         "area": area_limit,
-        "disk": disk_limit_gb,
+        "disk": disk_limit,
         "thread": str(thread_limit)
     }
 
@@ -489,6 +490,16 @@ def update_imagemagick_policy_xml(container_memory, svc_instances):
 
     with open(policy_xml_path, 'w') as f:
         f.write(pretty_xml_str)
+
+    # Run 'identify -list resource' to display the current resource limits
+    try:
+        result = subprocess.run(['/usr/local/bin/identify', '-list', 'resource'], capture_output=True, text=True, check=True)
+        print("Current ImageMagick resource limits:")
+        print(result.stdout)
+    except subprocess.CalledProcessError as e:
+        print(f"Error running 'identify -list resource': {e}")
+        print(f"Standard Output: {e.stdout}")
+        print(f"Standard Error: {e.stderr}")
 
     print(f"ImageMagick policy.xml updated with memory limits based on container memory and {svc_instances} concurrent instances.")
 
