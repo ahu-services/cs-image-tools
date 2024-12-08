@@ -11,7 +11,8 @@ RUN apt-get update && apt-get install -y wget build-essential libtool pkg-config
     libdjvulibre-dev libfftw3-dev libgraphviz-dev libheif-dev libwmf-dev \
     liblzma-dev libopenexr-dev libopenjp2-7-dev libpango1.0-dev libraqm-dev \
     libraw-dev librsvg2-dev libtiff-dev libwebp-dev libxml2-dev \
-    yasm xz-utils perl python3
+    yasm xz-utils perl python3 \
+    libx264-dev libx265-dev libnuma-dev nasm libvpx-dev libopus-dev libdav1d-dev
 RUN apt-get install ca-certificates
 
 ### Build Ghostscript
@@ -25,7 +26,6 @@ RUN wget https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download
     && tar -xzf ghostscript-${GHOSTSCRIPT_VERSION}.tar.gz \
     && cd ghostscript-${GHOSTSCRIPT_VERSION} \
     && ./configure && make && make install DESTDIR=/ghostscript-build
-
 
 ### Build ImageMagick
 FROM debian-builder AS im-builder
@@ -63,7 +63,9 @@ RUN wget https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz \
     && unxz ffmpeg-${FFMPEG_VERSION}.tar.xz \
     && tar -xf ffmpeg-${FFMPEG_VERSION}.tar \
     && cd ffmpeg-${FFMPEG_VERSION} \
-    && ./configure && make && make install DESTDIR=/ffmpeg-build
+    && ./configure --enable-gpl --enable-libx264 --enable-libx265 --enable-libvpx \
+    --enable-libopus --enable-libdav1d \
+    && make && make install DESTDIR=/ffmpeg-build
 
 ### Build ExifTool
 FROM debian-builder AS exif-builder
@@ -127,7 +129,8 @@ COPY --from=ffmpeg-builder /ffmpeg-build/ /TOOLS/
 FROM debian:trixie-slim as final
 RUN apt-get update && apt-get remove -y wpasupplicant && apt-get upgrade -y && \
     apt-get install -y iproute2 wget pkg-config wkhtmltopdf pngquant libimage-exiftool-perl \
-    libraqm-dev libfftw3-dev libtool python3 python3-pip python3-psutil ca-certificates java-common && \
+    libraqm-dev libfftw3-dev libtool python3 python3-pip python3-psutil ca-certificates java-common \
+    libvpx-dev libx264-dev libx265-dev && \
     apt-get upgrade -y && apt-get autoremove -y
 
 # Copy binaries from builder stages

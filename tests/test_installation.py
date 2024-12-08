@@ -105,6 +105,25 @@ def test_ffmpeg_installed_and_version():
     except FileNotFoundError:
         pytest.fail("'ffmpeg' command not found for user 'corpus'.")
 
+def test_ffmpeg_libs():
+    """Test that ffmpeg includes libs."""
+    ffmpeg_additional_libs = [
+        "libvpx",
+        "libopus",
+        "libx264",
+        "libx265",
+        "libdav1d"
+    ]
+    try:
+        # Get 'ffmpeg' linked libaries
+        result = subprocess.run(['/usr/bin/ldd', '/usr/local/bin/ffmpeg'], capture_output=True, text=True, check=True)
+        for lib in ffmpeg_additional_libs:
+            assert lib in result.stdout, f"ffmpeg version missing linked lib: {lib}"
+    except subprocess.CalledProcessError:
+        pytest.fail("ldd is not installed or cannot be executed.")
+    except FileNotFoundError:
+        pytest.fail("'ldd' command not found.")
+
 def test_third_party_licenses_installed():
     """Test that the third-party-licenses.txt file exists."""
     if not os.path.exists('/third-party-licenses.txt'):
