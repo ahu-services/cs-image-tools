@@ -111,14 +111,19 @@ def update_facility_paths(facility, key, office_url):
     facility (ET.Element): XML element that contains facility configuration.
     key (str): Facility key to determine which paths to update.
     """
-
     path_map = get_path_map()
 
     # Update paths based on facility key
     if key in path_map:
         paths = path_map[key]
         for i in range(0, len(paths), 2):
-            facility.find(f".//path[@key='{paths[i]}']").set('path', paths[i + 1])
+            path_element = facility.find(f".//path[@key='{paths[i]}']")
+            if path_element is not None:
+                path_element.set('path', paths[i + 1])
+            else:
+                # If the path element doesn't exist, create it
+                ET.SubElement(facility, 'path', {'key': paths[i], 'path': paths[i + 1]})
+        print(f"Updated paths for facility '{key}'.")
 
     # Handle specific facilities like 'office'
     if key == "office":
@@ -159,8 +164,12 @@ def handle_office_facility(facility, office_url, validate_certs=True):
             )
 
             if response.status == 200:
-                facility.find(".//path[@key='@@OFFICE@@']").set('port', office_url)
-                print(f"Successesfully tested ${office_url}, facility enabled.")
+                path_element = facility.find(".//path[@key='@@OFFICE@@']")
+                if path_element is not None:
+                    path_element.set('port', office_url)
+                else:
+                    ET.SubElement(facility, 'path', {'key': '@@OFFICE@@', 'port': office_url})
+                print(f"Successfully tested {office_url}, facility enabled.")
             else:
                 raise Exception(f"Non-200 status code received: {response.status}")
         except HTTPError as e:
@@ -196,7 +205,6 @@ def setup_icc_profiles(source_dir, target_dir):
     else:
         print(f"No ICC profiles found in {source_dir} or directory does not exist.")
 
-
 def run_as_corpus(command):
     """
     Executes a given shell command as 'corpus' user and captures the output.
@@ -227,7 +235,10 @@ def stop_service_client():
 
     # Find the process ID of the ServiceClient
     pid_command = "jps | grep ServiceClient | cut -f 1 -d ' '"
-    pid = subprocess.check_output(pid_command, shell=True, executable='/bin/bash', text=True).strip()
+    try:
+        pid = subprocess.check_output(pid_command, shell=True, executable='/bin/bash', text=True).strip()
+    except subprocess.CalledProcessError:
+        pid = ''
 
     if pid:
         # Send SIGTERM to the process
@@ -310,7 +321,12 @@ def update_volumes_configuration(hosts_xml_path):
         print("VOLUMES_INFO environment variable is not set.")
         return
 
-    volumes_info = json.loads(volumes_info)
+    try:
+        volumes_info = json.loads(volumes_info)
+    except json.JSONDecodeError:
+        print("VOLUMES_INFO environment variable is not valid JSON.")
+        return
+
     tree = ET.parse(hosts_xml_path)
     root = tree.getroot()
 
@@ -397,3 +413,4 @@ if __name__ == "__main__":
         except KeyboardInterrupt:
             print("Interrupted by user, stopping services...")
             stop_service_client()
+            sys.exit(0)

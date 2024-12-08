@@ -1,13 +1,13 @@
 import os
 import sys
-# Add the directory containing health_check.py to the Python path
-sys.path.append('/usr/local/bin')
 import re
 import subprocess
 import unittest
 from unittest import mock
 from unittest.mock import patch, mock_open
 
+# Add the project root to PYTHONPATH
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import health_check
 
 class TestHealthCheck(unittest.TestCase):
