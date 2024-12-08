@@ -16,7 +16,7 @@ RUN apt-get install ca-certificates
 
 ### Build Ghostscript
 FROM debian-builder AS ghostscript-builder
-ARG GHOSTSCRIPT_VERSION=10.03.1
+ARG GHOSTSCRIPT_VERSION=10.04.0
 
 # Download and build Ghostscript
 WORKDIR /tmp
@@ -29,7 +29,7 @@ RUN wget https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download
 
 ### Build ImageMagick
 FROM debian-builder AS im-builder
-ARG IMAGEMAGICK_VERSION=7.1.1-34
+ARG IMAGEMAGICK_VERSION=7.1.1-41
 
 # Download ImageMagick
 WORKDIR /tmp
@@ -55,7 +55,7 @@ RUN tar -xzvf ImageMagick-${IMAGEMAGICK_VERSION}.tar.gz \
 
 ### Build ffmpeg
 FROM debian-builder AS ffmpeg-builder
-ARG FFMPEG_VERSION=7.0.1
+ARG FFMPEG_VERSION=7.1
 
 # Download and build ffmpeg
 WORKDIR /tmp
@@ -67,7 +67,7 @@ RUN wget https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz \
 
 ### Build ExifTool
 FROM debian-builder AS exif-builder
-ARG EXIF_VERSION=12.87
+ARG EXIF_VERSION=13.00
 
 # Download and build ExifTool
 WORKDIR /tmp
@@ -126,8 +126,9 @@ COPY --from=ffmpeg-builder /ffmpeg-build/ /TOOLS/
 ### Final image
 FROM debian:trixie-slim as final
 RUN apt-get update && apt-get remove -y wpasupplicant && apt-get upgrade -y && \
-    apt-get install -y iproute2 wget pkg-config wkhtmltopdf pngquant \
-    libraqm-dev libfftw3-dev libtool python3 python3-pip ca-certificates java-common
+    apt-get install -y iproute2 wget pkg-config wkhtmltopdf pngquant libimage-exiftool-perl \
+    libraqm-dev libfftw3-dev libtool python3 python3-pip python3-psutil ca-certificates java-common && \
+    apt-get upgrade -y && apt-get autoremove -y
 
 # Copy binaries from builder stages
 COPY --from=image-tools-combined /TOOLS/ /
