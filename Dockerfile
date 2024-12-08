@@ -154,14 +154,14 @@ COPY entrypoint.py /usr/local/bin/entrypoint.py
 # Add health check script
 COPY health_check.py /usr/local/bin/health_check.py
 
-
 ### Test Stage
 FROM final as test
 RUN pip3 install pytest --break-system-packages
 COPY tests/test_installation.py /test_installation.py
+COPY tests/test_entrypoint.py /test_entrypoint.py
 COPY tests/test_health_check.py /test_health_check.py
 
-CMD ["pytest", "-v", "/test_installation.py", "/test_health_check.py"]
+CMD ["pytest", "-v", "/test_installation.py", "/test_entrypoint.py", "/test_health_check.py"]
 
 ### Release
 FROM final

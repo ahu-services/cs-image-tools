@@ -11,6 +11,7 @@ from xml.dom import minidom
 import urllib3
 from urllib3.exceptions import HTTPError
 import json
+import psutil  # New import for memory detection
 
 def str_to_bool(value):
     """
@@ -56,7 +57,7 @@ def configure_xml(svc_host, svc_user):
     svc_user (str): Username for service authentication.
     """
     # General service configuration
-    svc_instances = os.getenv('SVC_INSTANCES', '4')
+    svc_instances = os.getenv('SVC_INSTANCES', '4')  # Number of concurrent magick processes
     office_url = os.getenv('OFFICE_URL', '')
 
     # Connection details
@@ -359,7 +360,93 @@ def update_volumes_configuration(hosts_xml_path):
     
     print("Volumes configuration updated.")
 
-if __name__ == "__main__":
+def get_container_memory_limit():
+    """
+    Retrieves the memory limit set for the container in bytes.
+    """
+    try:
+        with open('/sys/fs/cgroup/memory/memory.limit_in_bytes', 'r') as f:
+            mem_limit = int(f.read().strip())
+            # If no limit is set, Docker uses a very high number. We'll cap it to a reasonable default, e.g., 8GB
+            if mem_limit >= 9223372036854771712:
+                mem_limit = 8 * 1024 * 1024 * 1024  # 6GB
+    except FileNotFoundError:
+        # Fallback if cgroup v2 is used or file not found
+        mem_limit = psutil.virtual_memory().total
+    return mem_limit
+
+def update_imagemagick_policy_xml(container_memory, svc_instances):
+    """
+    Updates ImageMagick's policy.xml with resource limits based on container memory and service instances.
+
+    Args:
+    - container_memory (int): Total memory available to the container in bytes.
+    - svc_instances (int): Number of concurrent magick processes.
+    """
+    # Define a buffer to leave some memory for other processes (e.g., 20%)
+    buffer_percentage = float(os.getenv('IMAGEMAGICK_BUFFER_PERCENTAGE', '0.2'))  # 20% by default
+    buffer_memory = int(container_memory * buffer_percentage)
+    available_memory = container_memory - buffer_memory
+
+    # Calculate memory per magick process
+    memory_per_process = int(available_memory / svc_instances)
+
+    # Set resource limits based on calculations
+    memory_limit_mb = memory_per_process // (1024 * 1024)
+    map_limit_mb = (memory_per_process * 2) // (1024 * 1024)  # Map is double the memory
+    area_limit = f"{(memory_per_process // (1024 * 1024)) * 1024}KP"  # width*height <= memory_in_MB * 1024
+    disk_limit_gb = f"{(buffer_memory // (1024 * 1024 * 1024)) * 2}GB"  # disk limit is twice the buffer memory in GB
+    thread_limit = min(svc_instances, os.cpu_count() or 4)  # Use the lesser of svc_instances or CPU cores
+
+    memory_limit = f"{memory_limit_mb}MB"
+    map_limit = f"{map_limit_mb}MB"
+
+    # Path to policy.xml (adjust if different)
+    policy_xml_path = "/usr/local/etc/ImageMagick-7/policy.xml"
+
+    # Parse the existing policy.xml
+    try:
+        tree = ET.parse(policy_xml_path)
+        root = tree.getroot()
+    except ET.ParseError as e:
+        print(f"Error parsing policy.xml: {e}")
+        sys.exit(1)
+
+    # Define the policies to update
+    policies_to_update = {
+        "memory": memory_limit,
+        "map": map_limit,
+        "area": area_limit,
+        "disk": disk_limit_gb,
+        "thread": str(thread_limit)
+    }
+
+    # Update or add the resource policies
+    for name, value in policies_to_update.items():
+        policy = root.find(f".//policy[@domain='resource'][@name='{name}']")
+        if policy is not None:
+            policy.set('value', value)
+            print(f"Updated policy: {name} = {value}")
+        else:
+            # If the policy doesn't exist, add it
+            ET.SubElement(root, 'policy', {
+                'domain': 'resource',
+                'name': name,
+                'value': value
+            })
+            print(f"Added policy: {name} = {value}")
+
+    # Write back the updated policy.xml with pretty formatting
+    xml_str = ET.tostring(root, encoding='utf-8')
+    parsed = minidom.parseString(xml_str)
+    pretty_xml_str = parsed.toprettyxml(indent="  ")
+
+    with open(policy_xml_path, 'w') as f:
+        f.write(pretty_xml_str)
+
+    print(f"ImageMagick policy.xml updated with memory limits based on container memory and {svc_instances} concurrent instances.")
+
+def main():
     # Stop censhare Client on SIGTERM
     signal.signal(signal.SIGTERM, signal_handler)
 
@@ -370,6 +457,21 @@ if __name__ == "__main__":
     if not all([svc_user, svc_pass, svc_host]):
         print("Required variables (SVC_USER, SVC_PASS, SVC_HOST) are not set.")
         sys.exit(1)    
+
+    # Retrieve the number of service instances from environment variable
+    svc_instances_env = os.getenv('SVC_INSTANCES', '4')
+    try:
+        svc_instances = int(svc_instances_env)
+        if svc_instances < 1:
+            raise ValueError
+    except ValueError:
+        print(f"Invalid SVC_INSTANCES value: '{svc_instances_env}'. It must be a positive integer.")
+        sys.exit(1)
+
+    # Update ImageMagick's policy.xml based on container memory and svc_instances
+    container_memory = get_container_memory_limit()
+    print(f"Container memory limit detected: {container_memory / (1024**3):.2f} GB")
+    update_imagemagick_policy_xml(container_memory, svc_instances)
 
     # Check if service client is pre-installed
     client_installed = os.path.exists("/opt/corpus/censhare/censhare-Service-Client")
@@ -414,3 +516,6 @@ if __name__ == "__main__":
             print("Interrupted by user, stopping services...")
             stop_service_client()
             sys.exit(0)
+
+if __name__ == "__main__":
+    main()
