@@ -372,5 +372,132 @@ class TestEntrypoint(unittest.TestCase):
         mock_follow_log_file.assert_called_once()
         mock_stop_service_client.assert_called_once()
 
+
+        @patch('entrypoint.os.getenv')
+        def test_update_facility_timeout_with_valid_env_var(self, mock_getenv):
+            """
+            Test that the timeout is correctly updated when a valid environment variable is set.
+            """
+            # Setup
+            facility = ET.Element('facility', attrib={'key': 'imagemagick', 'timeout': '300'})
+            mock_getenv.return_value = '600'  # Valid timeout value
+
+            # Call the function
+            update_facility_timeout(facility, 'imagemagick')
+
+            # Assert that the timeout was updated
+            self.assertEqual(facility.get('timeout'), '600')
+
+        @patch('entrypoint.os.getenv')
+        def test_update_facility_timeout_with_no_env_var(self, mock_getenv):
+            """
+            Test that the timeout remains unchanged when no environment variable is set.
+            """
+            # Setup
+            facility = ET.Element('facility', attrib={'key': 'exiftool', 'timeout': '120'})
+            mock_getenv.return_value = None  # No environment variable set
+
+            # Call the function
+            update_facility_timeout(facility, 'exiftool')
+
+            # Assert that the timeout remains unchanged
+            self.assertEqual(facility.get('timeout'), '120')
+
+        @patch('entrypoint.os.getenv')
+        def test_update_facility_timeout_with_invalid_env_var_non_integer(self, mock_getenv):
+            """
+            Test that the timeout remains unchanged and an error is logged when the environment variable is non-integer.
+            """
+            # Setup
+            facility = ET.Element('facility', attrib={'key': 'ghostscript', 'timeout': '300'})
+            mock_getenv.return_value = 'invalid'  # Invalid timeout value
+
+            # Capture the print output
+            with patch('builtins.print') as mock_print:
+                # Call the function
+                update_facility_timeout(facility, 'ghostscript')
+
+                # Assert that the timeout remains unchanged
+                self.assertEqual(facility.get('timeout'), '300')
+
+                # Assert that an error message was printed
+                mock_print.assert_any_call(
+                    "Invalid timeout value for 'TIMEOUT_GHOSTSCRIPT': invalid literal for int() with base 10: 'invalid'. Using default value '300'."
+                )
+
+        @patch('entrypoint.os.getenv')
+        def test_update_facility_timeout_with_negative_env_var(self, mock_getenv):
+            """
+            Test that the timeout remains unchanged and an error is logged when the environment variable is negative.
+            """
+            # Setup
+            facility = ET.Element('facility', attrib={'key': 'wkhtmltoimage', 'timeout': '120'})
+            mock_getenv.return_value = '-50'  # Negative timeout value
+
+            # Capture the print output
+            with patch('builtins.print') as mock_print:
+                # Call the function
+                update_facility_timeout(facility, 'wkhtmltoimage')
+
+                # Assert that the timeout remains unchanged
+                self.assertEqual(facility.get('timeout'), '120')
+
+                # Assert that an error message was printed
+                mock_print.assert_any_call(
+                    "Invalid timeout value for 'TIMEOUT_WKHTMLTOIMAGE': Timeout must be a non-negative integer.. Using default value '120'."
+                )
+
+        @patch('entrypoint.os.getenv')
+        def test_update_facility_timeout_with_zero_env_var(self, mock_getenv):
+            """
+            Test that the timeout is correctly updated to zero when the environment variable is set to '0'.
+            """
+            # Setup
+            facility = ET.Element('facility', attrib={'key': 'ghostscript', 'timeout': '300'})
+            mock_getenv.return_value = '0'  # Zero timeout value
+
+            # Call the function
+            update_facility_timeout(facility, 'ghostscript')
+
+            # Assert that the timeout was updated to '0'
+            self.assertEqual(facility.get('timeout'), '0')
+
+        @patch('entrypoint.os.getenv')
+        def test_update_facility_timeout_with_large_env_var(self, mock_getenv):
+            """
+            Test that the timeout is correctly updated when the environment variable is set to a very large value.
+            """
+            # Setup
+            facility = ET.Element('facility', attrib={'key': 'imagemagick', 'timeout': '300'})
+            mock_getenv.return_value = '999999'  # Very large timeout value
+
+            # Call the function
+            update_facility_timeout(facility, 'imagemagick')
+
+            # Assert that the timeout was updated
+            self.assertEqual(facility.get('timeout'), '999999')
+
+        @patch('entrypoint.os.getenv')
+        def test_update_facility_timeout_with_empty_string_env_var(self, mock_getenv):
+            """
+            Test that the timeout remains unchanged when the environment variable is set to an empty string.
+            """
+            # Setup
+            facility = ET.Element('facility', attrib={'key': 'pngquant', 'timeout': '120'})
+            mock_getenv.return_value = ''  # Empty string as environment variable
+
+            # Capture the print output
+            with patch('builtins.print') as mock_print:
+                # Call the function
+                update_facility_timeout(facility, 'pngquant')
+
+                # Assert that the timeout remains unchanged
+                self.assertEqual(facility.get('timeout'), '120')
+
+                # Assert that a message indicating no environment variable was set is printed
+                mock_print.assert_any_call(
+                    "No environment variable 'TIMEOUT_PNGQUANT' set. Using default timeout for facility 'pngquant'."
+                )
+
 if __name__ == '__main__':
     unittest.main()

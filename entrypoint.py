@@ -83,10 +83,11 @@ def configure_xml(svc_host, svc_user):
     facilities = root.find(".//facilities")
     facilities.attrib['instances'] = svc_instances
 
-    # Update paths and other settings for each facility
+    # Update paths, timeout, and other settings for each facility
     for facility in facilities.findall('.//facility'):
         key = facility.attrib['key']
         update_facility_paths(facility, key, office_url)
+        update_facility_timeout(facility, key)
 
     update_volumes_configuration("/opt/corpus/censhare/censhare-Service-Client/config/hosts.xml")
 
@@ -102,6 +103,34 @@ def get_path_map():
         'pngquant': ('@@PNGQUANT@@', '/usr/bin/pngquant'),
         'ffmpeg': ('@@FFMPEG-PATH@@', '/usr/local/bin/ffmpeg'),
     }
+
+def update_facility_timeout(facility, key):
+    """
+    Updates the timeout attribute of a facility based on an environment variable.
+
+    Args:
+    facility (ET.Element): XML element that contains facility configuration.
+    key (str): Facility key to determine which timeout to update.
+    """
+    # Define the environment variable name based on the facility key
+    env_var = f"TIMEOUT_{key.upper()}"
+
+    # Get the timeout value from the environment variable, if set
+    timeout_value = os.getenv(env_var)
+
+    if timeout_value:
+        try:
+            # Convert the timeout value to an integer
+            timeout_int = int(timeout_value)
+            if timeout_int < 0:
+                raise ValueError("Timeout must be a non-negative integer.")
+            # Update the 'timeout' attribute in the XML
+            facility.set('timeout', str(timeout_int))
+            print(f"Timeout for facility '{key}' set to {timeout_int} seconds via environment variable '{env_var}'.")
+        except ValueError as ve:
+            print(f"Invalid timeout value for '{env_var}': {ve}. Using default value '{facility.get('timeout')}'.")
+    else:
+        print(f"No environment variable '{env_var}' set. Using default timeout for facility '{key}'.")
 
 def update_facility_paths(facility, key, office_url):
     """
