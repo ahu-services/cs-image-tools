@@ -11,6 +11,7 @@ from xml.dom import minidom
 import urllib3
 from urllib3.exceptions import HTTPError
 import json
+import psutil  # New import for memory detection
 
 def str_to_bool(value):
     """
@@ -56,7 +57,7 @@ def configure_xml(svc_host, svc_user):
     svc_user (str): Username for service authentication.
     """
     # General service configuration
-    svc_instances = os.getenv('SVC_INSTANCES', '4')
+    svc_instances = os.getenv('SVC_INSTANCES', '4')  # Number of concurrent magick processes
     office_url = os.getenv('OFFICE_URL', '')
 
     # Connection details
@@ -82,10 +83,11 @@ def configure_xml(svc_host, svc_user):
     facilities = root.find(".//facilities")
     facilities.attrib['instances'] = svc_instances
 
-    # Update paths and other settings for each facility
+    # Update paths, timeout, and other settings for each facility
     for facility in facilities.findall('.//facility'):
         key = facility.attrib['key']
         update_facility_paths(facility, key, office_url)
+        update_facility_timeout(facility, key)
 
     update_volumes_configuration("/opt/corpus/censhare/censhare-Service-Client/config/hosts.xml")
 
@@ -101,6 +103,34 @@ def get_path_map():
         'pngquant': ('@@PNGQUANT@@', '/usr/bin/pngquant'),
         'ffmpeg': ('@@FFMPEG-PATH@@', '/usr/local/bin/ffmpeg'),
     }
+
+def update_facility_timeout(facility, key):
+    """
+    Updates the timeout attribute of a facility based on an environment variable.
+
+    Args:
+    facility (ET.Element): XML element that contains facility configuration.
+    key (str): Facility key to determine which timeout to update.
+    """
+    # Define the environment variable name based on the facility key
+    env_var = f"TIMEOUT_{key.upper()}"
+
+    # Get the timeout value from the environment variable, if set
+    timeout_value = os.getenv(env_var)
+
+    if timeout_value:
+        try:
+            # Convert the timeout value to an integer
+            timeout_int = int(timeout_value)
+            if timeout_int < 0:
+                raise ValueError("Timeout must be a non-negative integer.")
+            # Update the 'timeout' attribute in the XML
+            facility.set('timeout', str(timeout_int))
+            print(f"Timeout for facility '{key}' set to {timeout_int} seconds via environment variable '{env_var}'.")
+        except ValueError as ve:
+            print(f"Invalid timeout value for '{env_var}': {ve}. Using default value '{facility.get('timeout')}'.")
+    else:
+        print(f"No environment variable '{env_var}' set. Using default timeout for facility '{key}'.")
 
 def update_facility_paths(facility, key, office_url):
     """
@@ -359,7 +389,150 @@ def update_volumes_configuration(hosts_xml_path):
     
     print("Volumes configuration updated.")
 
-if __name__ == "__main__":
+def get_container_memory_limit():
+    """
+    Retrieves the memory limit set for the container in bytes.
+    Works with both cgroup v1 and v2, and handles ECS Fargate environments.
+    """
+    import os
+
+    # First, try ECS/Fargate environment variables
+    ecs_metadata_uri = os.getenv('ECS_CONTAINER_METADATA_URI_V4')
+    if ecs_metadata_uri:
+        try:
+            import requests
+            response = requests.get(f"{ecs_metadata_uri}/task", timeout=2)
+            if response.status_code == 200:
+                task_metadata = response.json()
+                mem_limit = int(task_metadata['Limits']['Memory']) * 1024 * 1024
+                print("Memory limit obtained from ECS metadata endpoint.")
+                return mem_limit
+            else:
+                print(f"Received non-200 response from ECS metadata endpoint: {response.status_code}")
+        except Exception as e:
+            print(f"Error fetching ECS task metadata: {e}")
+    else:
+        print("ECS_CONTAINER_METADATA_URI_V4 not set; skipping ECS metadata endpoint.")
+
+    # Try cgroup v2
+    try:
+        with open('/sys/fs/cgroup/memory.max', 'r') as f:
+            mem_limit_str = f.read().strip()
+            if mem_limit_str.isdigit():
+                mem_limit = int(mem_limit_str)
+                print("Memory limit obtained from cgroup v2.")
+                return mem_limit
+            elif mem_limit_str == 'max':
+                # No limit is set
+                mem_limit = psutil.virtual_memory().total
+                print("No memory limit set in cgroup v2; using total system memory.")
+                return mem_limit
+            else:
+                raise ValueError(f"Unexpected memory.max value: {mem_limit_str}")
+    except FileNotFoundError:
+        print("cgroup v2 memory.max not found; trying cgroup v1.")
+
+    # Try cgroup v1
+    try:
+        with open('/sys/fs/cgroup/memory/memory.limit_in_bytes', 'r') as f:
+            mem_limit = int(f.read().strip())
+            if mem_limit >= 9223372036854771712 or mem_limit == 0:
+                mem_limit = psutil.virtual_memory().total
+                print("No memory limit set in cgroup v1; using total system memory.")
+            else:
+                print("Memory limit obtained from cgroup v1.")
+            return mem_limit
+    except FileNotFoundError:
+        print("cgroup v1 memory.limit_in_bytes not found; unable to determine memory limit from cgroups.")
+
+    # As a last resort, use psutil
+    mem_limit = psutil.virtual_memory().total
+    print("Memory limit obtained from psutil.virtual_memory().total.")
+    return mem_limit
+
+def update_imagemagick_policy_xml(container_memory, svc_instances):
+    # Calculate buffer and available memory
+    buffer_percentage = float(os.getenv('IMAGEMAGICK_BUFFER_PERCENTAGE', '0.1'))  # Reduced to 10%
+    buffer_memory = int(container_memory * buffer_percentage)
+    available_memory = container_memory - buffer_memory
+
+    # Reduce the number of instances if necessary
+    svc_instances = int(os.getenv('SVC_INSTANCES', '4'))
+
+    # Calculate memory per process
+    memory_per_process = int(available_memory / svc_instances)
+
+    # Ensure minimum memory per process
+    min_memory_per_process = 1 * 1024 * 1024 * 1024  # 1GB
+    if memory_per_process < min_memory_per_process:
+        memory_per_process = min_memory_per_process
+
+    # Set resource limits
+    memory_limit_mb = memory_per_process // (1024 * 1024)
+    map_limit_mb = memory_limit_mb * 2  # Map is double the memory
+    area_limit = f"{memory_limit_mb * 1024}KP"  # width*height <= memory_in_MB * 1024
+    disk_limit = "40GiB"  # Set higher disk limit matching increased ephemeral storage
+    thread_limit = 1  # Limit threads to reduce resource contention
+
+    memory_limit = f"{memory_limit_mb}MB"
+    map_limit = f"{map_limit_mb}MB"
+
+    # Path to policy.xml
+    policy_xml_path = "/usr/local/etc/ImageMagick-7/policy.xml"
+
+    # Parse the existing policy.xml
+    try:
+        tree = ET.parse(policy_xml_path)
+        root = tree.getroot()
+    except ET.ParseError as e:
+        print(f"Error parsing policy.xml: {e}")
+        sys.exit(1)
+
+    # Define the policies to update
+    policies_to_update = {
+        "memory": memory_limit,
+        "map": map_limit,
+        "area": area_limit,
+        "disk": disk_limit,
+        "thread": str(thread_limit)
+    }
+
+    # Update or add the resource policies
+    for name, value in policies_to_update.items():
+        policy = root.find(f".//policy[@domain='resource'][@name='{name}']")
+        if policy is not None:
+            policy.set('value', value)
+            print(f"Updated policy: {name} = {value}")
+        else:
+            # If the policy doesn't exist, add it
+            ET.SubElement(root, 'policy', {
+                'domain': 'resource',
+                'name': name,
+                'value': value
+            })
+            print(f"Added policy: {name} = {value}")
+
+    # Write back the updated policy.xml with pretty formatting
+    xml_str = ET.tostring(root, encoding='utf-8')
+    parsed = minidom.parseString(xml_str)
+    pretty_xml_str = parsed.toprettyxml(indent="  ")
+
+    with open(policy_xml_path, 'w') as f:
+        f.write(pretty_xml_str)
+
+    # Run 'identify -list resource' to display the current resource limits
+    try:
+        result = subprocess.run(['/usr/local/bin/identify', '-list', 'resource'], capture_output=True, text=True, check=True)
+        print("Current ImageMagick resource limits:")
+        print(result.stdout)
+    except subprocess.CalledProcessError as e:
+        print(f"Error running 'identify -list resource': {e}")
+        print(f"Standard Output: {e.stdout}")
+        print(f"Standard Error: {e.stderr}")
+
+    print(f"ImageMagick policy.xml updated with memory limits based on container memory and {svc_instances} concurrent instances.")
+
+def main():
     # Stop censhare Client on SIGTERM
     signal.signal(signal.SIGTERM, signal_handler)
 
@@ -370,6 +543,21 @@ if __name__ == "__main__":
     if not all([svc_user, svc_pass, svc_host]):
         print("Required variables (SVC_USER, SVC_PASS, SVC_HOST) are not set.")
         sys.exit(1)    
+
+    # Retrieve the number of service instances from environment variable
+    svc_instances_env = os.getenv('SVC_INSTANCES', '4')
+    try:
+        svc_instances = int(svc_instances_env)
+        if svc_instances < 1:
+            raise ValueError
+    except ValueError:
+        print(f"Invalid SVC_INSTANCES value: '{svc_instances_env}'. It must be a positive integer.")
+        sys.exit(1)
+
+    # Update ImageMagick's policy.xml based on container memory and svc_instances
+    container_memory = get_container_memory_limit()
+    print(f"Container memory limit detected: {container_memory / (1024**3):.2f} GB")
+    update_imagemagick_policy_xml(container_memory, svc_instances)
 
     # Check if service client is pre-installed
     client_installed = os.path.exists("/opt/corpus/censhare/censhare-Service-Client")
@@ -414,3 +602,6 @@ if __name__ == "__main__":
             print("Interrupted by user, stopping services...")
             stop_service_client()
             sys.exit(0)
+
+if __name__ == "__main__":
+    main()
