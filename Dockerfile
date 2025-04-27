@@ -1,4 +1,3 @@
-# TODO build libjxl https://github.com/libjxl/libjxl
 # TODO build gslib
 # TODO build dmr https://github.com/ImageMagick/MagickCache
 ### TODO Build latest https://github.com/kornelski/pngquant
@@ -11,13 +10,14 @@ RUN apt-get update && apt-get install -y wget build-essential libtool pkg-config
     libdjvulibre-dev libfftw3-dev libgraphviz-dev libheif-dev libwmf-dev \
     liblzma-dev libopenexr-dev libopenjp2-7-dev libpango1.0-dev libraqm-dev \
     libraw-dev librsvg2-dev libtiff-dev libwebp-dev libxml2-dev \
-    yasm xz-utils perl python3 \
-    libx264-dev libx265-dev libnuma-dev nasm libvpx-dev libopus-dev libdav1d-dev
+    yasm xz-utils perl python3 git \
+    libx264-dev libx265-dev libnuma-dev nasm libvpx-dev libopus-dev libdav1d-dev \
+    libjxl-dev libx11-dev libxt-dev libxext-dev
 RUN apt-get install ca-certificates
 
 ### Build Ghostscript
 FROM debian-builder AS ghostscript-builder
-ARG GHOSTSCRIPT_VERSION=10.04.0
+ARG GHOSTSCRIPT_VERSION=10.05.0
 
 # Download and build Ghostscript
 WORKDIR /tmp
@@ -27,27 +27,50 @@ RUN wget https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download
     && cd ghostscript-${GHOSTSCRIPT_VERSION} \
     && ./configure && make && make install DESTDIR=/ghostscript-build
 
+### Build FPX libs for ImageMagick
+FROM debian-builder AS fpx-builder
+WORKDIR /tmp
+RUN git clone https://github.com/ImageMagick/libfpx.git \
+    && cd libfpx \
+    && ./configure --prefix=/usr \
+    && make -j$(nproc) \
+    && make install DESTDIR=/fpx-build
+
+### Build Ultra HDR (UHDR) libs for ImageMagick
+FROM debian-builder AS uhdr-builder
+WORKDIR /tmp
+RUN apt-get update && apt-get install -y cmake ninja-build clang libjpeg-dev \
+    && git clone https://github.com/google/libultrahdr.git \
+    && cd libultrahdr \
+    && mkdir build && cd build \
+    && cmake -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DUHDR_BUILD_TESTS=OFF .. \
+    && ninja \
+    && DESTDIR=/uhdr-build ninja install
+
 ### Build ImageMagick
 FROM debian-builder AS im-builder
-ARG IMAGEMAGICK_VERSION=7.1.1-41
+ARG IMAGEMAGICK_VERSION=7.1.1-47
 
 # Download ImageMagick
 WORKDIR /tmp
 RUN wget https://download.imagemagick.org/archive/releases/ImageMagick-${IMAGEMAGICK_VERSION}.tar.gz
 
 COPY --from=ghostscript-builder /ghostscript-build/ /
+COPY --from=fpx-builder /fpx-build/ /
+COPY --from=uhdr-builder /uhdr-build/ /
 
 # Unpack and compile ImageMagick
 RUN tar -xzvf ImageMagick-${IMAGEMAGICK_VERSION}.tar.gz \
     && cd ImageMagick-${IMAGEMAGICK_VERSION} \
-    && ./configure --enable-static --enable-openmp --enable-opencl --disable-hdri \
-    --with-xml --without-x --with-quantum-depth=16 --disable-dependency-tracking \
+    && CFLAGS=" -DIMPNG_SETJMP_IS_THREAD_SAFE" \
+    ./configure --enable-static --enable-openmp --enable-opencl --with-threads --with-jbig \
+    --enable-hdri --with-xml --without-x --with-quantum-depth=16 --disable-dependency-tracking \
     --with-modules --without-dps --with-freetype=yes --with-jpeg=yes --with-tiff=yes \
-    --with-png=yes --with-openjp2=no --with-fpx=no --with-lcms=yes --with-webp=yes \
-    --with-wmf=yes --without-rsvg --without-bzlib --without-magick-plus-plus \
-    --without-perl --without-apple-font-dir --without-dejavu-font-dir \
-    --without-windows-font-dir --with-gslib=yes --with-bzlib=yes --enable-hdri \
-    --with-openjp2=yes --with-fftw=yes --with-rsvg=yes \
+    --with-png=yes --with-openjp2=yes --with-fpx=yes --with-lcms=yes --with-webp=yes \
+    --with-wmf=yes --with-rsvg --with-bzlib --without-magick-plus-plus -with-heic=yes \
+    --without-perl --without-apple-font-dir --without-dejavu-font-dir --disable-docs \
+    --without-windows-font-dir --with-gslib=yes --with-security-policy=secure \
+    --with-openjp2=yes --with-fftw=yes --with-rsvg=yes --with-jxl=yes --with-uhdr \
     --with-gs-font-dir=/usr/share/ghostscript/fonts \
     --with-fontpath=/usr/share/ghostscript/fonts \
     && make -j$(nproc) \
@@ -55,7 +78,7 @@ RUN tar -xzvf ImageMagick-${IMAGEMAGICK_VERSION}.tar.gz \
 
 ### Build ffmpeg
 FROM debian-builder AS ffmpeg-builder
-ARG FFMPEG_VERSION=7.1
+ARG FFMPEG_VERSION=7.1.1
 
 # Download and build ffmpeg
 WORKDIR /tmp
@@ -69,7 +92,7 @@ RUN wget https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz \
 
 ### Build ExifTool
 FROM debian-builder AS exif-builder
-ARG EXIF_VERSION=13.00
+ARG EXIF_VERSION=13.25
 
 # Download and build ExifTool
 WORKDIR /tmp
@@ -122,16 +145,36 @@ COPY LICENSE third-party-licenses.txt /TOOLS/
 
 # Copy binaries from builder stages
 COPY --from=im-builder /IM-build/ /TOOLS/
+COPY --from=uhdr-builder /uhdr-build/ /TOOLS/
 COPY --from=ghostscript-builder /ghostscript-build/ /TOOLS/
 COPY --from=ffmpeg-builder /ffmpeg-build/ /TOOLS/
 
 ### Final image
 FROM debian:trixie-slim as final
 RUN apt-get update && apt-get remove -y wpasupplicant && apt-get upgrade -y && \
-    apt-get install -y iproute2 wget pkg-config wkhtmltopdf pngquant libimage-exiftool-perl \
-    libraqm-dev libfftw3-dev libtool python3 python3-pip python3-psutil ca-certificates java-common \
-    libvpx-dev libx264-dev libx265-dev && \
+    apt-get install -y iproute2 wget pkg-config pngquant libimage-exiftool-perl webp liblcms2-dev libxt-dev \
+    libopus-dev libdav1d-dev libraqm-dev libfftw3-dev libtool python3 python3-pip python3-psutil ca-certificates java-common \
+    libvpx-dev libx264-dev libx265-dev fontconfig libjpeg62-turbo libssl-dev xfonts-75dpi xfonts-base && \
     apt-get upgrade -y && apt-get autoremove -y
+
+# Install wkhtmltopdf with libssl1.1 for both amd64 and arm64
+RUN set -eux; \
+    ARCH="$(dpkg --print-architecture)"; \
+    if [ "$ARCH" = "amd64" ]; then \
+        LIBSSL_URL="http://security.debian.org/debian-security/pool/updates/main/o/openssl/libssl1.1_1.1.1w-0+deb11u2_amd64.deb"; \
+        WKHTML_URL="https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-3/wkhtmltox_0.12.6.1-3.bullseye_amd64.deb"; \
+    elif [ "$ARCH" = "arm64" ]; then \
+        LIBSSL_URL="http://security.debian.org/debian-security/pool/updates/main/o/openssl/libssl1.1_1.1.1w-0+deb11u2_arm64.deb"; \
+        WKHTML_URL="https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-3/wkhtmltox_0.12.6.1-3.bullseye_arm64.deb"; \
+    else \
+        echo "Unsupported architecture: $ARCH"; exit 1; \
+    fi; \
+    wget -O /tmp/libssl1.1.deb "$LIBSSL_URL"; \
+    dpkg -i /tmp/libssl1.1.deb; \
+    rm /tmp/libssl1.1.deb; \
+    wget -O /tmp/wkhtmltox.deb "$WKHTML_URL"; \
+    dpkg -i /tmp/wkhtmltox.deb; \
+    rm /tmp/wkhtmltox.deb
 
 # Copy binaries from builder stages
 COPY --from=image-tools-combined /TOOLS/ /
