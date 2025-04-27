@@ -20,20 +20,20 @@ Before you begin, ensure you have Docker installed on your system. You can downl
 
 ## Tools included in the image
 
-|Tool         |Version |
-|-------------|--------|
-|ImageMagick  |7.1.1-41|
-|Ghostscript  |10.04.0 |
-|ExifTool     |13.00   |
-|FFmpeg       |7.1     |
-|pngquant     |2.18.0  |
-|wkhtmltoimage|0.12.6  |
+|Tool         |Version    |
+|-------------|-----------|
+|ImageMagick  |7.1.1-47   |
+|Ghostscript  |10.05.0    |
+|ExifTool     |13.25      |
+|FFmpeg       |7.1.1      |
+|pngquant     |2.18.0     |
+|wkhtmltoimage|0.12.6.1-2 |
 
 ImageMagick Features and Delegates:
 
 ```
 Features: Cipher DPC HDRI Modules OpenMP(4.5)
-Delegates (built-in): bzlib cairo djvu fftw fontconfig freetype gvc heic jbig jng jp2 jpeg lcms ltdl lzma openexr pangocairo png raqm raw rsvg tiff webp wmf xml zip zlib zstd
+Delegates (built-in): bzlib cairo djvu fftw fontconfig fpx freetype gvc heic jbig jng jp2 jpeg jxl lcms ltdl lzma openexr pangocairo png raqm raw rsvg tiff uhdr webp wmf xml zip zlib zstd
 ```
 
 ## Building the Docker Image

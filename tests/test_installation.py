@@ -23,7 +23,7 @@ def test_user_corpus_can_execute_commands():
 
 def test_ghostscript_installed_and_version():
     """Test that Ghostscript is installed, executable, and the version is correct."""
-    expected_version = '10.04.0'
+    expected_version = '10.05.0'
     try:
         # Check if 'gs' command is available and get version
         result = subprocess.run(['/usr/local/bin/gs', '-version'], capture_output=True, text=True, check=True)
@@ -43,9 +43,10 @@ def test_ghostscript_installed_and_version():
 
 def test_imagemagick_installed_and_version():
     """Test that ImageMagick is installed, executable, and the version is correct."""
-    expected_version = '7.1.1-41'
+    expected_version = '7.1.1-47'
     expected_features = 'Features: Cipher DPC HDRI Modules OpenMP(4.5)'
-    expected_delegagtes = 'Delegates (built-in): bzlib cairo djvu fftw fontconfig freetype gvc heic jbig jng jp2 jpeg lcms ltdl lzma openexr pangocairo png raqm raw rsvg tiff webp wmf xml zip zlib zstd'
+    expected_delegagtes = 'Delegates (built-in): bzlib cairo djvu fftw fontconfig fpx freetype gvc heic jbig jng jp2 jpeg jxl lcms ltdl lzma openexr pangocairo png raqm raw rsvg tiff uhdr webp wmf xml zip zlib zstd'
+
     try:
         # Check if 'magick' command is available and get version
         result = subprocess.run(['/usr/local/bin/magick', '-version'], capture_output=True, text=True, check=True)
@@ -67,7 +68,7 @@ def test_imagemagick_installed_and_version():
 
 def test_exiftool_installed_and_version():
     """Test that ExifTool is installed, executable, and the version is correct."""
-    expected_version = '13.00'
+    expected_version = '13.25'
     try:
         # Check if 'exiftool' command is available and get version
         result = subprocess.run(['/usr/local/bin/exiftool', '-ver'], capture_output=True, text=True, check=True)
@@ -87,7 +88,7 @@ def test_exiftool_installed_and_version():
 
 def test_ffmpeg_installed_and_version():
     """Test that ffmpeg is installed, executable, and the version is correct."""
-    expected_version = '7.1'
+    expected_version = '7.1.1'
     try:
         # Check if 'ffmpeg' command is available and get version
         result = subprocess.run(['/usr/local/bin/ffmpeg', '-version'], capture_output=True, text=True, check=True)
