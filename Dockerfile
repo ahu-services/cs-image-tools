@@ -74,7 +74,8 @@ RUN tar -xzvf ImageMagick-${IMAGEMAGICK_VERSION}.tar.gz \
     --with-gs-font-dir=/usr/share/ghostscript/fonts \
     --with-fontpath=/usr/share/ghostscript/fonts \
     && make -j$(nproc) \
-    && make install DESTDIR=/IM-build
+    && make install DESTDIR=/IM-build \
+    && sed -i '/domain="delegate" rights="none" pattern="\*"/a\  <policy domain="delegate" rights="read|execute" pattern="inkscape"/>' /IM-build/usr/local/etc/ImageMagick-7/policy.xml
 
 ### Build ffmpeg
 FROM debian-builder AS ffmpeg-builder
@@ -152,9 +153,9 @@ COPY --from=ffmpeg-builder /ffmpeg-build/ /TOOLS/
 ### Final image
 FROM debian:trixie-slim as final
 RUN apt-get update && apt-get remove -y wpasupplicant && apt-get upgrade -y && \
-    apt-get install -y iproute2 wget pkg-config pngquant libimage-exiftool-perl webp liblcms2-dev libxt-dev \
+    apt-get install -y iproute2 wget pkg-config pngquant libimage-exiftool-perl webp liblcms2-dev libxt-dev librsvg2-bin \
     libopus-dev libdav1d-dev libraqm-dev libfftw3-dev libtool python3 python3-pip python3-psutil ca-certificates java-common \
-    libvpx-dev libx264-dev libx265-dev fontconfig libjpeg62-turbo libssl-dev xfonts-75dpi xfonts-base && \
+    libvpx-dev libx264-dev libx265-dev fontconfig libjpeg62-turbo libssl-dev xfonts-75dpi xfonts-base rawtherapee && \
     apt-get upgrade -y && apt-get autoremove -y
 
 # Install wkhtmltopdf with libssl1.1 for both amd64 and arm64
