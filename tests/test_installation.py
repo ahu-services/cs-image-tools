@@ -23,7 +23,7 @@ def test_user_corpus_can_execute_commands():
 
 def test_ghostscript_installed_and_version():
     """Test that Ghostscript is installed, executable, and the version is correct."""
-    expected_version = '10.05.0'
+    expected_version = '10.05.1'
     try:
         # Check if 'gs' command is available and get version
         result = subprocess.run(['/usr/local/bin/gs', '-version'], capture_output=True, text=True, check=True)

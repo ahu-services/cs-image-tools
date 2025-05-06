@@ -17,7 +17,7 @@ RUN apt-get install ca-certificates
 
 ### Build Ghostscript
 FROM debian-builder AS ghostscript-builder
-ARG GHOSTSCRIPT_VERSION=10.05.0
+ARG GHOSTSCRIPT_VERSION=10.05.1
 
 # Download and build Ghostscript
 WORKDIR /tmp
