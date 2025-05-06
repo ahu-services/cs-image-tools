@@ -74,8 +74,9 @@ RUN tar -xzvf ImageMagick-${IMAGEMAGICK_VERSION}.tar.gz \
     --with-gs-font-dir=/usr/share/ghostscript/fonts \
     --with-fontpath=/usr/share/ghostscript/fonts \
     && make -j$(nproc) \
-    && make install DESTDIR=/IM-build \
-    && sed -i '/domain="delegate" rights="none" pattern="\*"/a\  <policy domain="delegate" rights="read|execute" pattern="inkscape"/>' /IM-build/usr/local/etc/ImageMagick-7/policy.xml
+    && make install DESTDIR=/IM-build
+
+COPY imagemagick-policy.xml /IM-build/usr/local/etc/ImageMagick-7/policy.xml
 
 ### Build ffmpeg
 FROM debian-builder AS ffmpeg-builder
