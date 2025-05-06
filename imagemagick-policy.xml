@@ -48,18 +48,18 @@
   <!-- Set maximum amount of memory in bytes to allocate for the pixel cache
        from the heap. When this limit is exceeded, the image pixels are cached
        to memory-mapped disk. -->
-  <policy domain="resource" name="memory" value="256MiB"/>
+  <policy domain="resource" name="memory" value="2GiB"/>
   <!-- Set maximum amount of memory map in bytes to allocate for the pixel
        cache. When this limit is exceeded, the image pixels are cached to
        disk. -->
-  <policy domain="resource" name="map" value="512MiB"/>
+  <policy domain="resource" name="map" value="4GiB"/>
   <!-- Set the maximum width * height of an image that can reside in the pixel
        cache memory. Images that exceed the area limit are cached to disk. -->
   <policy domain="resource" name="area" value="400MP"/>
   <!-- Set maximum amount of disk space in bytes permitted for use by the pixel
        cache. When this limit is exceeded, the pixel cache is not be created
        and an exception is thrown. -->
-  <policy domain="resource" name="disk" value="1GiB"/>
+  <policy domain="resource" name="disk" value="10GiB"/>
   <!-- Set the maximum length of an image sequence.  When this limit is
        exceeded, an exception is thrown. -->
   <policy domain="resource" name="list-length" value="32"/>
@@ -82,9 +82,15 @@
   <policy domain="cache" name="synchronize" value="true"/>
   <!-- Replace passphrase for secure distributed processing -->
   <!-- <policy domain="cache" name="shared-secret" value="secret-passphrase" stealth="true"/> -->
-  <!-- Do not permit any delegates to execute. -->
+  <!-- Default: Block all delegates unless explicitly allowed -->
   <policy domain="delegate" rights="none" pattern="*"/>
+  <!-- Allow required delegates explicitly -->
+  <policy domain="delegate" rights="read|execute" pattern="ffmpeg"/>
   <policy domain="delegate" rights="read|execute" pattern="inkscape"/>
+  <policy domain="delegate" rights="read|execute" pattern="rsvg-convert"/>
+  <policy domain="delegate" rights="read|execute" pattern="gs"/>
+  <policy domain="delegate" rights="read|execute" pattern="tesseract"/>
+  <policy domain="delegate" rights="read|execute" pattern="dot"/>
   <!-- Do not permit any image filters to load. -->
   <policy domain="filter" rights="none" pattern="*"/>
   <!-- Don't read/write from/to stdin/stdout. -->
@@ -103,5 +109,5 @@
   <policy domain="system" name="memory-map" value="anonymous"/>
   <!-- Set the maximum amount of memory in bytes that are permitted for
        allocation requests. -->
-  <policy domain="system" name="max-memory-request" value="256MiB"/>
+  <policy domain="system" name="max-memory-request" value="1GiB"/>
 </policymap>
