@@ -1,6 +1,5 @@
 # TODO build gslib
 # TODO build dmr https://github.com/ImageMagick/MagickCache
-### TODO Build latest https://github.com/kornelski/pngquant
 
 ### Create base image for others
 FROM debian:trixie-slim AS debian-builder
@@ -12,7 +11,7 @@ RUN apt-get update && apt-get install -y wget build-essential libtool pkg-config
     libraw-dev librsvg2-dev libtiff-dev libwebp-dev libxml2-dev \
     yasm xz-utils perl python3 git \
     libx264-dev libx265-dev libnuma-dev nasm libvpx-dev libopus-dev libdav1d-dev \
-    libjxl-dev libx11-dev libxt-dev libxext-dev
+    libjxl-dev libx11-dev libxt-dev libpng-dev curl liblcms2-dev
 RUN apt-get install ca-certificates
 
 ### Build Ghostscript
@@ -104,6 +103,17 @@ RUN wget https://exiftool.org/Image-ExifTool-${EXIF_VERSION}.tar.gz \
     && perl Makefile.PL \
     && make install DESTDIR=/exif-build
 
+### Build latest pngquant
+FROM debian-builder AS pngquant-builder
+ARG PNGQUANT_VERSION=3.0.3
+WORKDIR /tmp
+RUN curl https://sh.rustup.rs -sSf | bash -s -- -y \
+    && . "$HOME/.cargo/env" \
+    && git clone --branch ${PNGQUANT_VERSION} --recursive https://github.com/kornelski/pngquant.git \
+    && cd pngquant \
+    && cargo build --release --features=lcms2 \
+    && install -Dm755 target/release/pngquant /pngquant-build/usr/local/bin/pngquant
+
 ### Image to combine all tools
 FROM debian-builder AS image-tools-combined
 
@@ -150,11 +160,12 @@ COPY --from=im-builder /IM-build/ /TOOLS/
 COPY --from=uhdr-builder /uhdr-build/ /TOOLS/
 COPY --from=ghostscript-builder /ghostscript-build/ /TOOLS/
 COPY --from=ffmpeg-builder /ffmpeg-build/ /TOOLS/
+COPY --from=pngquant-builder /pngquant-build/ /TOOLS/
 
 ### Final image
 FROM debian:trixie-slim as final
 RUN apt-get update && apt-get remove -y wpasupplicant && apt-get upgrade -y && \
-    apt-get install -y iproute2 wget pkg-config pngquant libimage-exiftool-perl webp liblcms2-dev libxt-dev librsvg2-bin \
+    apt-get install -y iproute2 wget pkg-config libimage-exiftool-perl webp liblcms2-dev libxt-dev librsvg2-bin \
     libopus-dev libdav1d-dev libraqm-dev libfftw3-dev libtool python3 python3-pip python3-psutil ca-certificates java-common \
     libvpx-dev libx264-dev libx265-dev fontconfig libjpeg62-turbo libssl-dev xfonts-75dpi xfonts-base rawtherapee && \
     apt-get upgrade -y && apt-get autoremove -y
