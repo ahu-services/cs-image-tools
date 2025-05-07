@@ -54,6 +54,11 @@ def configure_xml(svc_host, svc_user):
     Args:
     svc_host (str): Hostname of the service.
     svc_user (str): Username for service authentication.
+
+    Note:
+    Facility-specific timeouts can be set via environment variables, e.g.:
+      FFMPEG_TIMEOUT=1800
+      VIDEO_TIMEOUT=1800
     """
     # General service configuration
     svc_instances = os.getenv('SVC_INSTANCES', '4')
@@ -81,6 +86,13 @@ def configure_xml(svc_host, svc_user):
     # Update facilities instances
     facilities = root.find(".//facilities")
     facilities.attrib['instances'] = svc_instances
+
+    # Optional: Override timeouts via environment variables
+    for facility in facilities.findall('.//facility'):
+        key = facility.attrib['key']
+        timeout_env_var = os.getenv(f'{key.upper()}_TIMEOUT')
+        if timeout_env_var:
+            facility.set('timeout', timeout_env_var)
 
     # Update paths and other settings for each facility
     for facility in facilities.findall('.//facility'):

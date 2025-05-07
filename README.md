@@ -109,6 +109,14 @@ docker run -d --name csclient1 \
   cs-image-tools:v1.0
 ```
 
+# Example with custom tool timeouts (e.g. ffmpeg and video: 30 minutes)
+docker run -d --name csclient1 \
+  -e REPO_USER=repo_user -e REPO_PASS=repo_password -e VERSION=2023.1.1 \
+  -e SVC_USER=user -e SVC_PASS=password -e SVC_HOST=host.example.com \
+  -e FFMPEG_TIMEOUT=1800 -e VIDEO_TIMEOUT=1800 \
+  cs-image-tools:v1.0
+
+
 ## Running the Container together with collabora office to create previews for office documents
 
 To use a service for creating Office document previews, here is an example docker-compose:
@@ -157,9 +165,27 @@ These variables affect the runtime behavior of the Docker container:
 - `VOLUMES_INFO`: A JSON string defining the volume configurations, including physicalurl and filestreaming status for each volume.
 - `REPO_USER`, `REPO_PASS`, and `VERSION`: These can also be provided at runtime to download and configure the censhare-Service-Client if not done at build time.
 
+### Tool-Specific Timeouts
+
+Some tools may require more or less time to process depending on input complexity and resource availability. You can override their default execution timeouts using environment variables. The format is `<TOOLNAME>_TIMEOUT`, and the value is in seconds.
+
+**Supported tools and default timeouts:**
+
+| Tool        | Default Timeout | Example                         |
+|-------------|------------------|----------------------------------|
+| ffmpeg      | 600              | `FFMPEG_TIMEOUT=1800`           |
+| video       | 600              | `VIDEO_TIMEOUT=1800`            |
+| imagemagick | 300              | `IMAGEMAGICK_TIMEOUT=600`       |
+| exiftool    | 120              | `EXIFTOOL_TIMEOUT=90`           |
+| pngquant    | 120              | `PNGQUANT_TIMEOUT=60`           |
+
+If not set, the default values from `serviceclient-preferences-service-client.xml` will be used.
+
 ## Customization
 
 Modify the `entrypoint.py` and Dockerfile according to your specific needs. The entrypoint script is designed to handle environment variables for flexible runtime configuration.
+
+You can also influence tool execution behavior (e.g. timeouts) using environment variables like `FFMPEG_TIMEOUT`. See "Tool-Specific Timeouts" for more.
 
 ## License
 
