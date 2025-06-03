@@ -163,7 +163,7 @@ COPY --from=ffmpeg-builder /ffmpeg-build/ /TOOLS/
 COPY --from=pngquant-builder /pngquant-build/ /TOOLS/
 
 ### Final image
-FROM debian:trixie-slim as final
+FROM debian:trixie-slim AS final
 RUN apt-get update && apt-get remove -y wpasupplicant && apt-get upgrade -y && \
     apt-get install -y iproute2 wget pkg-config libimage-exiftool-perl webp liblcms2-dev libxt-dev librsvg2-bin \
     libopus-dev libdav1d-dev libraqm-dev libfftw3-dev libtool python3 python3-pip python3-psutil ca-certificates java-common \
@@ -215,7 +215,7 @@ COPY health_check.py /usr/local/bin/health_check.py
 
 
 ### Test Stage
-FROM final as test
+FROM final AS test
 RUN pip3 install pytest --break-system-packages
 COPY tests/test_installation.py /test_installation.py
 COPY tests/test_health_check.py /test_health_check.py
