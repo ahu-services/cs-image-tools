@@ -139,7 +139,7 @@ RUN if [ -n "$REPO_USER" ] && [ -n "$REPO_PASS" ] && [ -n "$VERSION" ]; then \
 RUN mkdir -p /opt/corpus
 
 # Install Corretto JDK
-ARG JDK_VERSION=17
+ARG JDK_VERSION=21
 RUN ARCH=$(uname -m); \
     if [ "$ARCH" = "x86_64" ]; then \
     ARCH="x64"; \
@@ -197,7 +197,7 @@ COPY --from=exif-builder /exif-build/usr/local/lib/ /usr/local/lib/
 COPY --from=exif-builder /exif-build/usr/local/share/ /usr/local/share/
 
 # Install Corretto JDK and refresh libraries
-ARG JDK_VERSION=17
+ARG JDK_VERSION=21
 RUN ldconfig; \
     groupadd -g 861 corpus; \
     useradd -d /opt/corpus -u 861 -g 861 -m  corpus; \

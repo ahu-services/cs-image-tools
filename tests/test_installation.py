@@ -130,13 +130,13 @@ def test_third_party_licenses_installed():
     if not os.path.exists('/third-party-licenses.txt'):
         pytest.fail("third-party-licenses.txt is not installed.")
 
-def test_jdk17_corretto_installed():
-    """Test that Amazon Corretto JDK 17 is installed."""
+def test_jdk21_corretto_installed():
+    """Test that Amazon Corretto JDK 21 is installed."""
     try:
         result = subprocess.run(['java', '-version'], capture_output=True, text=True, check=True)
         output = result.stderr  # Java version info is sent to stderr
         assert 'Corretto' in output, "Amazon Corretto JDK not installed."
-        assert '17' in output, "JDK version is not 17."
+        assert '21' in output, "JDK version is not 21."
     except subprocess.CalledProcessError:
         pytest.fail("Java is not installed or cannot be executed.")
     except FileNotFoundError:
