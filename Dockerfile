@@ -192,9 +192,9 @@ RUN set -eux; \
 # Copy binaries from builder stages
 COPY --from=image-tools-combined /TOOLS/ /
 COPY --from=exif-builder /exif-build/usr/local/bin/ /usr/local/bin/
-COPY --from=exif-builder /exif-build/usr/local/man/ //usr/local/man/
-COPY --from=exif-builder /exif-build/usr/local/lib/ //usr/local/lib/
-COPY --from=exif-builder /exif-build/usr/local/share/ //usr/local/share/
+COPY --from=exif-builder /exif-build/usr/local/man/ /usr/local/man/
+COPY --from=exif-builder /exif-build/usr/local/lib/ /usr/local/lib/
+COPY --from=exif-builder /exif-build/usr/local/share/ /usr/local/share/
 
 # Install Corretto JDK and refresh libraries
 ARG JDK_VERSION=17
