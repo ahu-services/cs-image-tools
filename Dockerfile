@@ -174,10 +174,10 @@ RUN apt-get update && apt-get remove -y wpasupplicant && apt-get upgrade -y && \
 RUN set -eux; \
     ARCH="$(dpkg --print-architecture)"; \
     if [ "$ARCH" = "amd64" ]; then \
-        LIBSSL_URL="http://security.debian.org/debian-security/pool/updates/main/o/openssl/libssl1.1_1.1.1w-0+deb11u2_amd64.deb"; \
+        LIBSSL_URL="http://security.debian.org/debian-security/pool/updates/main/o/openssl/libssl1.1_1.1.1w-0+deb11u3_amd64.deb"; \
         WKHTML_URL="https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-3/wkhtmltox_0.12.6.1-3.bullseye_amd64.deb"; \
     elif [ "$ARCH" = "arm64" ]; then \
-        LIBSSL_URL="http://security.debian.org/debian-security/pool/updates/main/o/openssl/libssl1.1_1.1.1w-0+deb11u2_arm64.deb"; \
+        LIBSSL_URL="http://security.debian.org/debian-security/pool/updates/main/o/openssl/libssl1.1_1.1.1w-0+deb11u3_arm64.deb"; \
         WKHTML_URL="https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-3/wkhtmltox_0.12.6.1-3.bullseye_arm64.deb"; \
     else \
         echo "Unsupported architecture: $ARCH"; exit 1; \
