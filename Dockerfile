@@ -128,28 +128,42 @@ COPY . /app
 ## Optionally download and install censhare-Service-Client during build
 RUN if [ -n "$REPO_USER" ] && [ -n "$REPO_PASS" ] && [ -n "$VERSION" ]; then \
         groupadd -g 861 corpus; \
-        useradd -d /opt/corpus -u 861 -g 861 -m  corpus; \        
+        useradd -d /opt/corpus -u 861 -g 861 -m corpus; \
         wget --user=$REPO_USER --password=$REPO_PASS https://rpm.censhare.com/censhare-release/censhare-Service/v$VERSION/Shell/censhare-Service-Client-v$VERSION.tar.gz -O /tmp/censhare-client.tar.gz && \
         tar -xzf /tmp/censhare-client.tar.gz -C /opt/corpus && \
         chown -R corpus:corpus /opt/corpus && \
+        mkdir -p /opt/corpus/censhare && \
+        echo "$VERSION" > /opt/corpus/censhare/client-version.txt && \
         rm -f /tmp/censhare-client.tar.gz; \
     fi
 
 # Create the directory to ensure it always exists
 RUN mkdir -p /opt/corpus
 
-# Install Corretto JDK
-ARG JDK_VERSION=17
-RUN ARCH=$(uname -m); \
-    if [ "$ARCH" = "x86_64" ]; then \
-    ARCH="x64"; \
-    elif [ "$ARCH" = "aarch64" ]; then \
-    ARCH="aarch64"; \
-    else \
-    echo "Unsupported architecture"; \
-    exit 1; \
+# Prepare optional Corretto JDK download
+RUN set -eux; \
+    mkdir -p /TOOLS; \
+    if [ -n "${VERSION:-}" ]; then \
+        RELEASE_KEY=$(printf "%s" "$VERSION" | awk -F. 'NF>=2 && $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ {printf "%d%02d", $1, $2}'); \
+        if [ -z "$RELEASE_KEY" ]; then \
+            JDK_RESOLVED=17; \
+        elif [ "$RELEASE_KEY" -le 202201 ]; then \
+            JDK_RESOLVED=11; \
+        elif [ "$RELEASE_KEY" -le 202403 ]; then \
+            JDK_RESOLVED=17; \
+        else \
+            JDK_RESOLVED=21; \
+        fi; \
+        ARCH=$(uname -m); \
+        case "$ARCH" in \
+            x86_64) ARCH_ALIAS="x64" ;; \
+            aarch64) ARCH_ALIAS="aarch64" ;; \
+            *) echo "Unsupported architecture: $ARCH"; exit 1 ;; \
+        esac; \
+        echo "Using Corretto JDK ${JDK_RESOLVED} for Service-Client ${VERSION}"; \
+        wget -O "/TOOLS/amazon-corretto-${JDK_RESOLVED}-${ARCH_ALIAS}-linux-jdk.deb" \
+            "https://corretto.aws/downloads/latest/amazon-corretto-${JDK_RESOLVED}-${ARCH_ALIAS}-linux-jdk.deb"; \
     fi; \
-    mkdir /TOOLS/; cd /TOOLS; wget https://corretto.aws/downloads/latest/amazon-corretto-${JDK_VERSION}-${ARCH}-linux-jdk.deb; \
     if [ -d /app/iccprofiles ]; then cp -r /app/iccprofiles /TOOLS/build_iccprofiles; fi
 
 # Add 3rd party license information
@@ -196,14 +210,15 @@ COPY --from=exif-builder /exif-build/usr/local/man/ //usr/local/man/
 COPY --from=exif-builder /exif-build/usr/local/lib/ //usr/local/lib/
 COPY --from=exif-builder /exif-build/usr/local/share/ //usr/local/share/
 
-# Install Corretto JDK and refresh libraries
-ARG JDK_VERSION=17
+# Install Corretto JDK (if provided) and refresh libraries
 RUN ldconfig; \
     groupadd -g 861 corpus; \
     useradd -d /opt/corpus -u 861 -g 861 -m  corpus; \
     pip install requests --break-system-packages; \
-    apt-get install -y /amazon-corretto-*-linux-jdk.deb && \
-    rm -f /amazon-corretto-*-linux-jdk.deb && \
+    if ls /amazon-corretto-*-linux-jdk.deb >/dev/null 2>&1; then \
+        apt-get install -y /amazon-corretto-*-linux-jdk.deb; \
+        rm -f /amazon-corretto-*-linux-jdk.deb; \
+    fi; \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Add Service-Client if included in build

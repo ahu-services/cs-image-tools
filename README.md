@@ -13,6 +13,7 @@ This Docker setup is tailored for deploying the censhare-Service-Client in a con
 - **Optional Pre-installation**: Support for building images with censhare-Service-Client already downloaded and unpacked, using build-time arguments.
 - **Flexible Configuration**: Dynamic configuration changes based on environment variables.
 - **Graceful Shutdown**: Proper shutdown process handling to ensure data integrity.
+- **Adaptive JDK Installation**: Automatically picks the matching Amazon Corretto (11/17/21) for the Service-Client version at build time or container start.
 
 ## Prerequisites
 
@@ -180,6 +181,18 @@ Some tools may require more or less time to process depending on input complexit
 | pngquant    | 120              | `PNGQUANT_TIMEOUT=60`           |
 
 If not set, the default values from `serviceclient-preferences-service-client.xml` will be used.
+
+## Java Runtime Selection
+
+The container keeps the Service-Client and Java runtime in sync automatically:
+
+- `2019.2` — `2022.1` use Corretto 11
+- `2022.2` — `2024.3` use Corretto 17
+- `2025.1` and newer use Corretto 21
+
+Only the major release component (first two numbers of `VERSION`, e.g. `2025.3`) is used to pick the JDK.
+
+When you pass `VERSION` during image build, the Dockerfile fetches and installs the matching Corretto release so the image is ready to run out of the box. If you skip pre-installation, the base image stays slim and the entrypoint fetches the appropriate Corretto version on container start using the same compatibility matrix.
 
 ## Customization
 
