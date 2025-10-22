@@ -1,4 +1,6 @@
 import os
+import platform
+import re
 import shutil
 import time
 import requests
@@ -11,6 +13,14 @@ from xml.dom import minidom
 import urllib3
 from urllib3.exceptions import HTTPError
 import json
+
+JAVA_WINDOWS = [
+    (202201, 11),
+    (202403, 17),
+]
+JAVA_DEFAULT = 21
+
+CLIENT_VERSION_FILE = "/opt/corpus/censhare/client-version.txt"
 
 def str_to_bool(value):
     """
@@ -46,6 +56,103 @@ def download_unpack(url, output_path):
     else:
         print("Failed to download the file.")
         sys.exit(1)
+
+def select_jdk_major(client_version):
+    """
+    Chooses the JDK major version for the given client version.
+    """
+    if not client_version:
+        print("Warning: censhare Service-Client version unknown, defaulting to JDK 17.")
+        return 17
+    parts = client_version.split('.')
+    if len(parts) < 2:
+        print(f"Warning: Unexpected version format '{client_version}', defaulting to JDK 17.")
+        return 17
+    try:
+        major = int(parts[0])
+        minor = int(parts[1])
+    except ValueError:
+        print(f"Warning: Unable to parse version '{client_version}', defaulting to JDK 17.")
+        return 17
+
+    release_key = major * 100 + minor
+    for upper_bound, jdk in JAVA_WINDOWS:
+        if release_key <= upper_bound:
+            return jdk
+    return JAVA_DEFAULT
+
+def store_client_version(version):
+    if not version:
+        return
+    try:
+        os.makedirs(os.path.dirname(CLIENT_VERSION_FILE), exist_ok=True)
+        with open(CLIENT_VERSION_FILE, 'w') as handle:
+            handle.write(version)
+    except OSError as exc:
+        print(f"Warning: Unable to persist client version to {CLIENT_VERSION_FILE}: {exc}")
+
+def ensure_corretto(jdk_major):
+    """
+    Installs (or reuses) the Corretto release that matches the requested major version.
+    """
+    def configure_java_environment(java_binary):
+        java_home = os.path.dirname(os.path.dirname(os.path.realpath(java_binary)))
+        os.environ['JAVA_HOME'] = java_home
+        os.environ['JDK_HOME'] = java_home
+        os.environ['PATH'] = f"{os.path.join(java_home, 'bin')}:{os.environ.get('PATH', '')}"
+        try:
+            subprocess.run(['update-alternatives', '--set', 'java', java_binary], check=False)
+            javac_binary = os.path.join(java_home, 'bin', 'javac')
+            if os.path.exists(javac_binary):
+                subprocess.run(['update-alternatives', '--set', 'javac', javac_binary], check=False)
+        except FileNotFoundError:
+            print("update-alternatives not available; skipping alternative configuration.")
+
+    java_binary = shutil.which('java')
+    current_major = None
+    if java_binary:
+        try:
+            result = subprocess.run([java_binary, '-version'], capture_output=True, text=True, check=True)
+            match = re.search(r'version\s+"(\d+)', result.stderr + result.stdout)
+            if match:
+                current_major = int(match.group(1))
+        except (subprocess.CalledProcessError, ValueError):
+            current_major = None
+
+    if current_major == jdk_major:
+        print(f"Using existing Corretto JDK {jdk_major}.")
+        configure_java_environment(java_binary)
+        return
+
+    arch_lookup = {
+        "x86_64": "x64",
+        "aarch64": "aarch64",
+    }
+    machine = platform.machine()
+    try:
+        arch = arch_lookup[machine]
+    except KeyError as exc:
+        raise RuntimeError(f"Unsupported architecture for Corretto JDK: {machine}") from exc
+
+    url = f"https://corretto.aws/downloads/latest/amazon-corretto-{jdk_major}-{arch}-linux-jdk.deb"
+    deb_path = f"/tmp/amazon-corretto-{jdk_major}.deb"
+    print(f"Installing Corretto JDK {jdk_major} from {url}...")
+    subprocess.run(['wget', '-q', '-O', deb_path, url], check=True)
+    try:
+        subprocess.run(['dpkg', '-i', deb_path], check=True)
+    except subprocess.CalledProcessError:
+        subprocess.run(['apt-get', 'update'], check=True)
+        subprocess.run(['apt-get', '-y', '-f', 'install'], check=True)
+        subprocess.run(['dpkg', '-i', deb_path], check=True)
+    finally:
+        if os.path.exists(deb_path):
+            os.remove(deb_path)
+
+    java_binary = shutil.which('java')
+    if java_binary:
+        configure_java_environment(java_binary)
+    else:
+        print("Warning: Java binary not found after installation.")
 
 def configure_xml(svc_host, svc_user):
     """
@@ -376,6 +483,7 @@ if __name__ == "__main__":
     signal.signal(signal.SIGTERM, signal_handler)
 
     # Environment variables
+    client_version_env = os.getenv("VERSION")
     svc_user = os.getenv("SVC_USER")
     svc_pass = os.getenv("SVC_PASS")
     svc_host = os.getenv("SVC_HOST")
@@ -385,16 +493,31 @@ if __name__ == "__main__":
 
     # Check if service client is pre-installed
     client_installed = os.path.exists("/opt/corpus/censhare/censhare-Service-Client")
+    client_version = None
     if not client_installed:
         repo_user = os.getenv("REPO_USER")
         repo_pass = os.getenv("REPO_PASS")
-        version = os.getenv("VERSION")
+        version = client_version_env
         if not all([repo_user, repo_pass, version]):
             print("Service client not pre-installed and required variables (REPO_USER, REPO_PASS, VERSION) are not set.")
             sys.exit(1)
-        
+
         download_url = f"https://{repo_user}:{repo_pass}@rpm.censhare.com/censhare-release/censhare-Service/v{version}/Shell/censhare-Service-Client-v{version}.tar.gz"
         download_unpack(download_url, "/tmp/censhare-client.tar.gz")
+        store_client_version(version)
+        client_version = version
+    elif client_version_env:
+        client_version = client_version_env
+        store_client_version(client_version)
+    elif os.path.exists(CLIENT_VERSION_FILE):
+        try:
+            with open(CLIENT_VERSION_FILE, 'r') as handle:
+                client_version = handle.read().strip()
+        except OSError:
+            client_version = None
+
+    required_jdk_major = select_jdk_major(client_version)
+    ensure_corretto(required_jdk_major)
 
     # Install custom iccprofiles if provided in build
     icc_source = "/build_iccprofiles"

@@ -4,6 +4,8 @@ import pytest
 import subprocess
 import os
 import pwd
+import re
+import shutil
 
 def test_user_corpus_exists():
     """Test that the user 'corpus' exists in the system."""
@@ -130,13 +132,20 @@ def test_third_party_licenses_installed():
     if not os.path.exists('/third-party-licenses.txt'):
         pytest.fail("third-party-licenses.txt is not installed.")
 
-def test_jdk17_corretto_installed():
-    """Test that Amazon Corretto JDK 17 is installed."""
+import re
+
+def test_corretto_jdk_installed():
+    """Test that an Amazon Corretto JDK from the supported set is installed when present."""
+    java_path = shutil.which('java')
+    if java_path is None:
+        pytest.skip("Corretto JDK not pre-installed in this image variant.")
     try:
-        result = subprocess.run(['java', '-version'], capture_output=True, text=True, check=True)
-        output = result.stderr  # Java version info is sent to stderr
-        assert 'Corretto' in output, "Amazon Corretto JDK not installed."
-        assert '17' in output, "JDK version is not 17."
+        result = subprocess.run([java_path, '-version'], capture_output=True, text=True, check=True)
+        combined_output = result.stderr + result.stdout  # Java version info is usually in stderr
+        assert 'Corretto' in combined_output, "Amazon Corretto JDK not installed."
+        match = re.search(r'version\s+"(\d+)', combined_output)
+        assert match, "Unable to detect Java version."
+        assert match.group(1) in {'11', '17', '21'}, "JDK major version is not within the supported set (11, 17, 21)."
     except subprocess.CalledProcessError:
         pytest.fail("Java is not installed or cannot be executed.")
     except FileNotFoundError:
