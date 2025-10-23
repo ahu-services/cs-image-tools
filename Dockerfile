@@ -184,23 +184,18 @@ RUN apt-get update && apt-get remove -y wpasupplicant && apt-get upgrade -y && \
     libvpx-dev libx264-dev libx265-dev fontconfig libjpeg62-turbo libssl-dev xfonts-75dpi xfonts-base rawtherapee && \
     apt-get upgrade -y && apt-get autoremove -y
 
-# Install wkhtmltopdf with libssl1.1 for both amd64 and arm64
+# Install wkhtmltopdf for both amd64 and arm64
 RUN set -eux; \
     ARCH="$(dpkg --print-architecture)"; \
     if [ "$ARCH" = "amd64" ]; then \
-        LIBSSL_URL="http://security.debian.org/debian-security/pool/updates/main/o/openssl/libssl1.1_1.1.1w-0+deb11u2_amd64.deb"; \
-        WKHTML_URL="https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-3/wkhtmltox_0.12.6.1-3.bullseye_amd64.deb"; \
+        WKHTML_URL="https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-3/wkhtmltox_0.12.6.1-3.bookworm_amd64.deb"; \
     elif [ "$ARCH" = "arm64" ]; then \
-        LIBSSL_URL="http://security.debian.org/debian-security/pool/updates/main/o/openssl/libssl1.1_1.1.1w-0+deb11u2_arm64.deb"; \
-        WKHTML_URL="https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-3/wkhtmltox_0.12.6.1-3.bullseye_arm64.deb"; \
+        WKHTML_URL="https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-3/wkhtmltox_0.12.6.1-3.bookworm_arm64.deb"; \
     else \
         echo "Unsupported architecture: $ARCH"; exit 1; \
     fi; \
-    wget -O /tmp/libssl1.1.deb "$LIBSSL_URL"; \
-    dpkg -i /tmp/libssl1.1.deb; \
-    rm /tmp/libssl1.1.deb; \
     wget -O /tmp/wkhtmltox.deb "$WKHTML_URL"; \
-    dpkg -i /tmp/wkhtmltox.deb; \
+    dpkg -i /tmp/wkhtmltox.deb || (apt-get update && apt-get -y -f install && dpkg -i /tmp/wkhtmltox.deb); \
     rm /tmp/wkhtmltox.deb
 
 # Copy binaries from builder stages
