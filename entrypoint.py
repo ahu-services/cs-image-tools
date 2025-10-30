@@ -2,6 +2,7 @@ import os
 import platform
 import re
 import shutil
+import shlex
 import time
 import requests
 import tarfile
@@ -62,18 +63,18 @@ def select_jdk_major(client_version):
     Chooses the JDK major version for the given client version.
     """
     if not client_version:
-        print("Warning: censhare Service-Client version unknown, defaulting to JDK 17.")
-        return 17
+        print(f"Warning: censhare Service-Client version unknown, defaulting to JDK {JAVA_DEFAULT}.")
+        return JAVA_DEFAULT
     parts = client_version.split('.')
     if len(parts) < 2:
-        print(f"Warning: Unexpected version format '{client_version}', defaulting to JDK 17.")
-        return 17
+        print(f"Warning: Unexpected version format '{client_version}', defaulting to JDK {JAVA_DEFAULT}.")
+        return JAVA_DEFAULT
     try:
         major = int(parts[0])
         minor = int(parts[1])
     except ValueError:
-        print(f"Warning: Unable to parse version '{client_version}', defaulting to JDK 17.")
-        return 17
+        print(f"Warning: Unable to parse version '{client_version}', defaulting to JDK {JAVA_DEFAULT}.")
+        return JAVA_DEFAULT
 
     release_key = major * 100 + minor
     for upper_bound, jdk in JAVA_WINDOWS:
@@ -324,27 +325,46 @@ def setup_icc_profiles(source_dir, target_dir):
     else:
         print(f"No ICC profiles found in {source_dir} or directory does not exist.")
 
-def run_as_corpus(command):
+def run_as_corpus(command, input_data=None):
     """
-    Executes a given shell command as 'corpus' user and captures the output.
+    Executes a given command as 'corpus' user and captures the output.
 
     Args:
-    command (str): Shell command to execute.
+    command (List[str]): Command arguments to execute.
+    input_data (str): Optional stdin data to pass to the process.
 
     Returns:
     subprocess.CompletedProcess: The result object including stdout, stderr, and exit status.
     """
-    # Prepend the 'su - corpus -c' to run the command as the 'corpus' user
-    corpus_command = f"su - corpus -c \"{command}\""
+    def _run(cmd):
+        return subprocess.run(
+            cmd,
+            text=True,
+            capture_output=True,
+            check=True,
+            input=input_data,
+        )
+
     try:
-        result = subprocess.run(corpus_command, shell=True, executable='/bin/bash', text=True, capture_output=True, check=True)
-        print(result.stdout)
-        return result
+        result = _run(['runuser', '-u', 'corpus', '--', *command])
+    except FileNotFoundError:
+        try:
+            quoted_command = shlex.join(command)
+            result = _run(['su', '-s', '/bin/bash', 'corpus', '-c', quoted_command])
+        except subprocess.CalledProcessError as e:
+            print(f"Command failed with exit status {e.returncode}", file=sys.stderr)
+            print(e.stderr, file=sys.stderr)
+            return e
     except subprocess.CalledProcessError as e:
-        # Output the stderr and stdout from the subprocess if it fails
         print(f"Command failed with exit status {e.returncode}", file=sys.stderr)
         print(e.stderr, file=sys.stderr)
         return e
+
+    if result.stdout:
+        print(result.stdout)
+    if result.stderr:
+        print(result.stderr, file=sys.stderr)
+    return result
 
 def stop_service_client():
     """
@@ -529,9 +549,23 @@ if __name__ == "__main__":
     setup_icc_profiles(icc_source, icc_target) 
 
     # Run setup and start commands
-    setup_command = f"yes Y | /opt/corpus/censhare/censhare-Service-Client/serviceclient.sh setup -m frmis://{svc_host}:30546/corpus.RMIServerSSL -n {svc_host} -u {svc_user} -p {svc_pass}"
-    start_command = "/opt/corpus/censhare/censhare-Service-Client/serviceclient.sh start"
-    run_as_corpus(setup_command)
+    setup_command = [
+        "/opt/corpus/censhare/censhare-Service-Client/serviceclient.sh",
+        "setup",
+        "-m",
+        f"frmis://{svc_host}:30546/corpus.RMIServerSSL",
+        "-n",
+        svc_host,
+        "-u",
+        svc_user,
+        "-p",
+        svc_pass,
+    ]
+    start_command = [
+        "/opt/corpus/censhare/censhare-Service-Client/serviceclient.sh",
+        "start",
+    ]
+    run_as_corpus(setup_command, input_data="Y\n" * 10)
     configure_xml(svc_host, svc_user)
     run_as_corpus(start_command)
 
