@@ -1,61 +1,28 @@
 # censhare-Service-Client Docker Configuration
 
-This repository contains Docker configurations and scripts for setting up and running the censhare-Service-Client within a Docker container. This setup is designed to be flexible, supporting both dynamic configuration at runtime and pre-configuration during image building.
+This repository provides a Docker image and entrypoint to run the censhare-Service-Client with a consistent, containerized setup. It supports dynamic configuration at runtime or pre-configuration during image build.
 
-## Introduction
+## Overview
 
-This Docker setup is tailored for deploying the censhare-Service-Client in a containerized environment, ensuring isolation and consistency across different deployment scenarios. The configuration allows for both on-the-fly setup during container startup and pre-setup during the Docker image build, based on environment variables and build arguments.
-
-## Features
-
-- **ImageMagick Installation**: Image processing tools included.
-- **FFmpeg and ExifTool**: Media processing and metadata extraction tools.
-- **Optional Pre-installation**: Support for building images with censhare-Service-Client already downloaded and unpacked, using build-time arguments.
-- **Flexible Configuration**: Dynamic configuration changes based on environment variables.
-- **Graceful Shutdown**: Proper shutdown process handling to ensure data integrity.
-- **Adaptive JDK Installation**: Automatically picks the matching Amazon Corretto (11/17/21) for the Service-Client version at build time or container start.
+- Runs censhare-Service-Client in a container with common media tooling
+- Dynamic or pre-installed Service-Client (via `REPO_USER`, `REPO_PASS`, `VERSION`)
+- Flexible configuration via environment variables and JSON volume config
+- Graceful shutdown handling for data integrity
+- Automatic Java runtime selection (Corretto 11/17/21) matching Service-Client version
 
 ## Prerequisites
 
-Before you begin, ensure you have Docker installed on your system. You can download and install Docker from [Docker's official site](https://docs.docker.com/get-docker/).
+- Docker installed: see https://docs.docker.com/get-docker/
 
-## Tools included in the image
+## Quick Start
 
-|Tool         |Version    |
-|-------------|-----------|
-|ImageMagick  |7.1.2-7    |
-|Ghostscript  |10.06.0    |
-|ExifTool     |13.36      |
-|FFmpeg       |8.0        |
-|pngquant     |3.0.3      |
-|wkhtmltoimage|0.12.6.1-2 |
-
-ImageMagick Features and Delegates:
-
-```
-Features: Cipher DPC HDRI Modules OpenMP(4.5)
-Delegates (built-in): bzlib cairo djvu fftw fontconfig fpx freetype gvc heic jbig jng jp2 jpeg jxl lcms ltdl lzma openexr pangocairo png raqm raw rsvg tiff uhdr webp wmf xml zip zlib zstd
-```
-
-## Building the Docker Image
-
-To build the Docker image, use the following command:
+Build the base image:
 
 ```bash
 docker build -t cs-image-tools:v1.0 .
 ```
 
-To pre-install censhare-Service-Client during build, provide the `REPO_USER`, `REPO_PASS`, and `VERSION` as build arguments:
-
-```bash
-docker build --build-arg REPO_USER=youruser --build-arg REPO_PASS=yourpass --build-arg VERSION=2023.1.1 -t cs-service-client:2023.1.1 .
-```
-
-If there is a `iccprofiles` folder within the build direcotires, it will also be copied to the docker image during build, and during container run, the content will be copied to the `/opt/corpus/censhare/censhare-Service-Client/config/iccprofile` folder.
-
-## Running the Container
-
-If censhare-Service-Client was not included in your build, run your Docker container using the following command, to download and install dynamically:
+Run and download Service-Client at startup:
 
 ```bash
 docker run -d --name csclient1 \
@@ -64,30 +31,86 @@ docker run -d --name csclient1 \
   cs-image-tools:v1.0
 ```
 
-If you got the censhare-Service-Client already installed in your build, just pass service-client username, password and host to connect to.
+Pre-install the Service-Client at build time and run:
 
 ```bash
-docker run -d --name csclient1 cs-service-client:2023.1.1 \
-  -e SVC_USER=user -e SVC_PASS=password -e SVC_HOST=host.example.com
+# Build with Service-Client baked in
+docker build \
+  --build-arg REPO_USER=youruser \
+  --build-arg REPO_PASS=yourpass \
+  --build-arg VERSION=2023.1.1 \
+  -t cs-service-client:2023.1.1 .
+
+# Run the pre-installed image (pass only connection settings)
+docker run -d --name csclient1 \
+  -e SVC_USER=user -e SVC_PASS=password -e SVC_HOST=host.example.com \
+  cs-service-client:2023.1.1
 ```
+
+Note: If an `iccprofiles` folder exists in the build context, it is copied into the image. On container start its contents are copied to `/opt/corpus/censhare/censhare-Service-Client/config/iccprofile`.
+
+## Configuration
+
+### Build-time variables
+
+- `REPO_USER`: Username for the repository hosting the Service-Client. Required when pre-installing during build.
+- `REPO_PASS`: Password for the repository. Used with `REPO_USER`.
+- `VERSION`: Version of the Service-Client to download and install.
+
+### Runtime variables
+
+- `SVC_USER`: Username for the Service-Client connection/config.
+- `SVC_PASS`: Password for the Service-Client.
+- `SVC_HOST`: Hostname or IP of the censhare server to connect to.
+- `SVC_INSTANCES`: Number of parallel worker instances. Default `4`.
+- `OFFICE_URL`: URL of an office conversion service. If unset or unreachable, office previews are disabled.
+- `OFFICE_VALIDATE_CERTS`: Validate SSL certificates for `OFFICE_URL`. Set to `false` to disable validation.
+- `VOLUMES_INFO`: JSON string to fully replace the `volumes` section in `hosts.xml`.
+- `REPO_USER`, `REPO_PASS`, `VERSION`: May also be provided at runtime to download/configure the Service-Client if not pre-installed.
+
+### Tool-specific timeouts
+
+Override processing timeouts with `<TOOLNAME>_TIMEOUT` (seconds). If not set, defaults from `serviceclient-preferences-service-client.xml` are used.
+
+| Tool        | Default Timeout | Example               |
+|-------------|------------------|-----------------------|
+| ffmpeg      | 600              | `FFMPEG_TIMEOUT=1800` |
+| video       | 600              | `VIDEO_TIMEOUT=1800`  |
+| imagemagick | 300              | `IMAGEMAGICK_TIMEOUT=600` |
+| exiftool    | 120              | `EXIFTOOL_TIMEOUT=90` |
+| pngquant    | 120              | `PNGQUANT_TIMEOUT=60` |
+
+Example (set longer ffmpeg/video timeouts):
+
+```bash
+docker run -d --name csclient1 \
+  -e REPO_USER=repo_user -e REPO_PASS=repo_password -e VERSION=2023.1.1 \
+  -e SVC_USER=user -e SVC_PASS=password -e SVC_HOST=host.example.com \
+  -e FFMPEG_TIMEOUT=1800 -e VIDEO_TIMEOUT=1800 \
+  cs-image-tools:v1.0
+```
+
+## Storage and ICC Profiles
 
 ### Custom ICC profiles
 
-If you have ICC profiles you want to add, you can mount them directly to the container in `/iccprofiles`. All files will be copied to the censhare-Service-Client iccprofiles directory.
+Mount ICC profiles at `/iccprofiles`. All files are copied to the Service-Client ICC profile directory on start.
 
 ```bash
 docker run -d --name csclient1 \
   -e REPO_USER=repo_user -e REPO_PASS=repo_password -e VERSION=2023.1.1 \
   -e SVC_USER=user -e SVC_PASS=password -e SVC_HOST=host.example.com \
-  -v ${PWD}/custom_iccprofiles:/iccprofiles
+  -v "${PWD}/custom_iccprofiles:/iccprofiles" \
   cs-image-tools:v1.0
 ```
 
-### Volume Configuration with VOLUMES_INFO
+### Volume configuration with `VOLUMES_INFO`
 
-To dynamically configure volume information, use the VOLUMES_INFO environment variable to provide a JSON string with volume details. This will completely replace the existing volumes section in the hosts.xml file.
+By default, the Service-Client uses RMI to transfer files to and from the censhare Server. Supplying `VOLUMES_INFO` and mounting the asset storage into the container lets the Service-Client access those paths locally (via the filesystem) instead. This reduces RMI traffic and can improve throughput and latency, provided the `physicalurl` values map to mounted paths and permissions are set correctly.
 
-#### Example VOLUMES_INFO
+Provide a JSON string to replace the `volumes` section in `hosts.xml`.
+
+Example definition (as YAML for readability):
 
 ```yaml
 VOLUMES_INFO: >
@@ -99,28 +122,20 @@ VOLUMES_INFO: >
   }
 ```
 
-#### Docker Run Command with VOLUMES_INFO
+Run example using `VOLUMES_INFO` and a mounted host path for assets:
 
 ```bash
 docker run -d --name csclient1 \
   -e REPO_USER=repo_user -e REPO_PASS=repo_password -e VERSION=2023.1.1 \
   -e SVC_USER=user -e SVC_PASS=password -e SVC_HOST=host.example.com \
   -e VOLUMES_INFO='{"assets": {"physicalurl": "file:///assets/", "filestreaming": false}, "assets-temp": {"physicalurl": "file:///assets/assets-temp/", "filestreaming": false}, "assets-s3": {"endpoint": "s3.amazon.com", "bucket-name": "assets-s3", "secret": "foobar"}, "temp": {"physicalurl": "file:///opt/corpus/work/temp/", "filestreaming": true}}' \
-  -v /opt/corpus/work/assets:/assets
+  -v /opt/corpus/work/assets:/assets \
   cs-image-tools:v1.0
 ```
 
-# Example with custom tool timeouts (e.g. ffmpeg and video: 30 minutes)
-docker run -d --name csclient1 \
-  -e REPO_USER=repo_user -e REPO_PASS=repo_password -e VERSION=2023.1.1 \
-  -e SVC_USER=user -e SVC_PASS=password -e SVC_HOST=host.example.com \
-  -e FFMPEG_TIMEOUT=1800 -e VIDEO_TIMEOUT=1800 \
-  cs-image-tools:v1.0
+## Office Previews (Collabora)
 
-
-## Running the Container together with collabora office to create previews for office documents
-
-To use a service for creating Office document previews, here is an example docker-compose:
+Use Collabora Online to create previews for office documents. Example `docker-compose.yml`:
 
 ```yaml
 services:
@@ -141,50 +156,9 @@ services:
       - "9980:9980"
 ```
 
-## Environment Variables
-
-This project uses several environment variables for configuration during the Docker build process and at runtime. Below is a description of each:
-
-### Build-time Variables
-
-These variables are used during the Docker image build process to pre-install the censhare-Service-Client:
-
-- `REPO_USER`: Username for the repository from which the censhare-Service-Client is downloaded. This variable is mandatory if pre-installing the client during the build.
-- `REPO_PASS`: Password for the repository. This must be provided along with `REPO_USER`.
-- `VERSION`: Version of the censhare-Service-Client to download and install.
-
-### Runtime Variables
-
-These variables affect the runtime behavior of the Docker container:
-
-- `SVC_USER`: Username required for the censhare service client configuration. It is used to set user-specific configurations in the service client's settings.
-- `SVC_PASS`: Password for the censhare service client. Used in conjunction with `SVC_USER`.
-- `SVC_HOST`: Hostname or IP address where the censhare service client connects. This setting is crucial for network communication setup.
-- `SVC_INSTANCES`: Defines the number of instances for parallel processing within the service client. Default is `4`.
-- `OFFICE_URL`: URL of the office service for document conversion services. If not set or the service is unreachable, the related functionality is disabled.
-- `OFFICE_VALIDATE_CERTS`: If the OFFICE_URL uses SSL, the certificates are validated. To turn validation off, set the `OFFICE_VALIDATE_CERTS` to `false`.
-- `VOLUMES_INFO`: A JSON string defining the volume configurations, including physicalurl and filestreaming status for each volume.
-- `REPO_USER`, `REPO_PASS`, and `VERSION`: These can also be provided at runtime to download and configure the censhare-Service-Client if not done at build time.
-
-### Tool-Specific Timeouts
-
-Some tools may require more or less time to process depending on input complexity and resource availability. You can override their default execution timeouts using environment variables. The format is `<TOOLNAME>_TIMEOUT`, and the value is in seconds.
-
-**Supported tools and default timeouts:**
-
-| Tool        | Default Timeout | Example                         |
-|-------------|------------------|----------------------------------|
-| ffmpeg      | 600              | `FFMPEG_TIMEOUT=1800`           |
-| video       | 600              | `VIDEO_TIMEOUT=1800`            |
-| imagemagick | 300              | `IMAGEMAGICK_TIMEOUT=600`       |
-| exiftool    | 120              | `EXIFTOOL_TIMEOUT=90`           |
-| pngquant    | 120              | `PNGQUANT_TIMEOUT=60`           |
-
-If not set, the default values from `serviceclient-preferences-service-client.xml` will be used.
-
 ## Java Runtime Selection
 
-The container keeps the Service-Client and Java runtime in sync automatically:
+The image keeps the Service-Client and Java runtime in sync automatically:
 
 - `2019.2` — `2022.1` use Corretto 11
 - `2022.2` — `2024.3` use Corretto 17
@@ -194,12 +168,28 @@ Only the major release component (first two numbers of `VERSION`, e.g. `2025.3`)
 
 When you pass `VERSION` during image build, the Dockerfile fetches and installs the matching Corretto release so the image is ready to run out of the box. If you skip pre-installation, the base image stays slim and the entrypoint fetches the appropriate Corretto version on container start using the same compatibility matrix.
 
+## Tools Included
+
+| Tool         | Version   |
+|--------------|-----------|
+| ImageMagick  | 7.1.2-7   |
+| Ghostscript  | 10.06.0   |
+| ExifTool     | 13.36     |
+| FFmpeg       | 8.0       |
+| pngquant     | 3.0.3     |
+| wkhtmltoimage| 0.12.6.1-2|
+
+ImageMagick features and delegates:
+
+```
+Features: Cipher DPC HDRI Modules OpenMP(4.5)
+Delegates (built-in): bzlib cairo djvu fftw fontconfig fpx freetype gvc heic jbig jng jp2 jpeg jxl lcms ltdl lzma openexr pangocairo png raqm raw rsvg tiff uhdr webp wmf xml zip zlib zstd
+```
+
 ## Customization
 
-Modify the `entrypoint.py` and Dockerfile according to your specific needs. The entrypoint script is designed to handle environment variables for flexible runtime configuration.
-
-You can also influence tool execution behavior (e.g. timeouts) using environment variables like `FFMPEG_TIMEOUT`. See "Tool-Specific Timeouts" for more.
+You can adjust the behavior in `entrypoint.py` and the Dockerfile to fit your needs. The entrypoint handles environment variables for flexible runtime configuration.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
