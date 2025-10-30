@@ -14,6 +14,7 @@ from xml.dom import minidom
 import urllib3
 from urllib3.exceptions import HTTPError
 import json
+import hashlib
 
 JAVA_WINDOWS = [
     (202201, 11),
@@ -22,6 +23,22 @@ JAVA_WINDOWS = [
 JAVA_DEFAULT = 21
 
 CLIENT_VERSION_FILE = "/opt/corpus/censhare/client-version.txt"
+SERVICECLIENT_SCRIPT = "/opt/corpus/censhare/censhare-Service-Client/serviceclient.sh"
+
+def _determine_serviceclient_version(script_path=SERVICECLIENT_SCRIPT):
+    """
+    Extract the service client version marker from the serviceclient.sh script.
+    """
+    version_pattern = re.compile(r'-Dcenshare\.serviceclient\.version=([\w\.\-]+)')
+    try:
+        with open(script_path, 'r', encoding='utf-8') as handle:
+            for line in handle:
+                match = version_pattern.search(line)
+                if match:
+                    return match.group(1)
+    except OSError as exc:
+        print(f"Warning: Unable to read {script_path} for version detection: {exc}")
+    return None
 
 def str_to_bool(value):
     """
@@ -46,14 +63,29 @@ def download_unpack(url, output_path):
     """
     response = requests.get(url, stream=True)
     if response.status_code == 200:
+        hashers = {
+            'md5': hashlib.md5(),
+            'sha256': hashlib.sha256(),
+        }
         with open(output_path, 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
-        print("Download complete. Unpacking...")
+                for hasher in hashers.values():
+                    hasher.update(chunk)
+        print("Download complete.")
+        print("Archive checksums:")
+        for name, hasher in hashers.items():
+            print(f"  {name.upper()}: {hasher.hexdigest()}")
+        print("Unpacking...")
         with tarfile.open(output_path) as tar:
             tar.extractall(path="/opt/corpus/")
         print("Unpacking complete.")
         subprocess.run(['chown', '-R', 'corpus:corpus', '/opt/corpus/'], check=True)
+        detected_version = _determine_serviceclient_version()
+        if detected_version:
+            print(f"Installed service client version: {detected_version}")
+        else:
+            print("Warning: Could not determine installed service client version from serviceclient.sh.")
     else:
         print("Failed to download the file.")
         sys.exit(1)
