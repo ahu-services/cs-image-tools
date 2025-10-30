@@ -70,7 +70,7 @@ def test_imagemagick_installed_and_version():
 
 def test_exiftool_installed_and_version():
     """Test that ExifTool is installed, executable, and the version is correct."""
-    expected_version = '13.39'
+    expected_version = '13.36'
     try:
         # Check if 'exiftool' command is available and get version
         result = subprocess.run(['/usr/local/bin/exiftool', '-ver'], capture_output=True, text=True, check=True)

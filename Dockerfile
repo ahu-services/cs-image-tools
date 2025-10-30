@@ -93,15 +93,17 @@ RUN wget https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz \
 
 ### Build ExifTool
 FROM debian-builder AS exif-builder
-ARG EXIF_VERSION=13.39
+ARG EXIF_VERSION=13.36
 
 # Download and build ExifTool
 WORKDIR /tmp
-RUN wget https://exiftool.org/Image-ExifTool-${EXIF_VERSION}.tar.gz \
-    && tar -xzf Image-ExifTool-${EXIF_VERSION}.tar.gz \
-    && cd Image-ExifTool-${EXIF_VERSION} \
-    && perl Makefile.PL \
-    && make install DESTDIR=/exif-build
+RUN set -eux; \
+    curl -L "https://sourceforge.net/projects/exiftool/files/Image-ExifTool-${EXIF_VERSION}.tar.gz/download" -o exiftool.tar.gz; \
+    mkdir exiftool-src; \
+    tar -xzf exiftool.tar.gz -C exiftool-src --strip-components=1; \
+    cd exiftool-src; \
+    perl Makefile.PL; \
+    make install DESTDIR=/exif-build
 
 ### Build latest pngquant
 FROM debian-builder AS pngquant-builder
