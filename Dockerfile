@@ -48,7 +48,7 @@ RUN apt-get update && apt-get install -y cmake ninja-build clang libjpeg-dev \
 
 ### Build ImageMagick
 FROM debian-builder AS im-builder
-ARG IMAGEMAGICK_VERSION=7.1.2-7
+ARG IMAGEMAGICK_VERSION=7.1.2-9
 
 # Download ImageMagick
 WORKDIR /tmp
@@ -79,7 +79,7 @@ COPY imagemagick-policy.xml /IM-build/usr/local/etc/ImageMagick-7/policy.xml
 
 ### Build ffmpeg
 FROM debian-builder AS ffmpeg-builder
-ARG FFMPEG_VERSION=8.0
+ARG FFMPEG_VERSION=8.0.1
 
 # Download and build ffmpeg
 WORKDIR /tmp
@@ -180,11 +180,16 @@ COPY --from=pngquant-builder /pngquant-build/ /TOOLS/
 
 ### Final image
 FROM debian:trixie-slim as final
-RUN apt-get update && apt-get remove -y wpasupplicant && apt-get upgrade -y && \
-    apt-get install -y iproute2 wget pkg-config libimage-exiftool-perl webp liblcms2-dev libxt-dev librsvg2-bin \
+RUN set -eux; \
+    apt-get update; \
+    apt-get remove -y wpasupplicant; \
+    apt-get upgrade -y; \
+    apt-get install -y --no-install-recommends iproute2 wget pkg-config libimage-exiftool-perl webp liblcms2-dev libxt-dev librsvg2-bin \
     libopus-dev libdav1d-dev libraqm-dev libfftw3-dev libtool python3 python3-pip python3-psutil ca-certificates java-common \
-    libvpx-dev libx264-dev libx265-dev fontconfig libjpeg62-turbo libssl-dev xfonts-75dpi xfonts-base rawtherapee && \
-    apt-get upgrade -y && apt-get autoremove -y
+    libvpx-dev libx264-dev libx265-dev fontconfig libjpeg62-turbo libssl-dev xfonts-75dpi xfonts-base rawtherapee; \
+    apt-get purge -y samba samba-libs smbclient libsmbclient winbind libwbclient0 cifs-utils || true; \
+    apt-get upgrade -y; \
+    apt-get autoremove -y
 
 # Install wkhtmltopdf for both amd64 and arm64
 RUN set -eux; \

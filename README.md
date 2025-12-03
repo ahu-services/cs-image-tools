@@ -26,7 +26,7 @@ Run and download Service-Client at startup:
 
 ```bash
 docker run -d --name csclient1 \
-  -e REPO_USER=repo_user -e REPO_PASS=repo_password -e VERSION=2023.1.1 \
+  -e REPO_USER=repo_user -e REPO_PASS=repo_password -e VERSION=2025.2.0 \
   -e SVC_USER=user -e SVC_PASS=password -e SVC_HOST=host.example.com \
   cs-image-tools:v1.0
 ```
@@ -38,13 +38,13 @@ Pre-install the Service-Client at build time and run:
 docker build \
   --build-arg REPO_USER=youruser \
   --build-arg REPO_PASS=yourpass \
-  --build-arg VERSION=2023.1.1 \
-  -t cs-service-client:2023.1.1 .
+  --build-arg VERSION=2025.2.0 \
+  -t cs-service-client:2025.2.0 .
 
 # Run the pre-installed image (pass only connection settings)
 docker run -d --name csclient1 \
   -e SVC_USER=user -e SVC_PASS=password -e SVC_HOST=host.example.com \
-  cs-service-client:2023.1.1
+  cs-service-client:2025.2.0
 ```
 
 Note: If an `iccprofiles` folder exists in the build context, it is copied into the image. On container start its contents are copied to `/opt/corpus/censhare/censhare-Service-Client/config/iccprofile`.
@@ -62,6 +62,10 @@ Note: If an `iccprofiles` folder exists in the build context, it is copied into 
 - `SVC_USER`: Username for the Service-Client connection/config.
 - `SVC_PASS`: Password for the Service-Client.
 - `SVC_HOST`: Hostname or IP of the censhare server to connect to.
+- `SERVICECLIENT_RMI_PORT`: Fixed RMI listener port (port-range from/to). Default `30550`.
+- `SERVICECLIENT_CALLBACK_HOST`: Optional public/host IP or DNS name to embed in callbacks; when set, the entrypoint auto-fills `client-map-host-from` with the detected container IP and maps to this value.
+- `CLIENT_MAP_HOST_FROM` / `CLIENT_MAP_HOST_TO`: Override the RMI host mapping baked into the stub (advanced NAT/PAT).
+- `CLIENT_MAP_PORT_FROM` / `CLIENT_MAP_PORT_TO`: Override RMI port mapping if the external callback port differs.
 - `SVC_INSTANCES`: Number of parallel worker instances. Default `4`.
 - `OFFICE_URL`: URL of an office conversion service. If unset or unreachable, office previews are disabled.
 - `OFFICE_VALIDATE_CERTS`: Validate SSL certificates for `OFFICE_URL`. Set to `false` to disable validation.
@@ -84,11 +88,18 @@ Example (set longer ffmpeg/video timeouts):
 
 ```bash
 docker run -d --name csclient1 \
-  -e REPO_USER=repo_user -e REPO_PASS=repo_password -e VERSION=2023.1.1 \
+  -e REPO_USER=repo_user -e REPO_PASS=repo_password -e VERSION=2025.2.0 \
   -e SVC_USER=user -e SVC_PASS=password -e SVC_HOST=host.example.com \
   -e FFMPEG_TIMEOUT=1800 -e VIDEO_TIMEOUT=1800 \
   cs-image-tools:v1.0
 ```
+
+## Networking and callbacks
+
+- Default behavior switches to `port-range` mode and aligns the client-map port mapping to `SERVICECLIENT_RMI_PORT` (default `30550`). Allow inbound TCP on this port.
+- Host networking (`--network host`) is the simplest and default assumption; it avoids NAT rewrite requirements and lets the server call back directly.
+- If you must run in bridge/NAT mode, supply the externally reachable host/IP via `SERVICECLIENT_CALLBACK_HOST` and forward `SERVICECLIENT_RMI_PORT` to the container. The entrypoint sets `client-map-host-from` to the detected RMI host inside the container and maps to your provided callback host (ports are kept in sync unless you override the client-map port vars).
+- For complex NAT/PAT, override `CLIENT_MAP_HOST_FROM/TO` and `CLIENT_MAP_PORT_FROM/TO` explicitly so the RMI stub is rewritten to the right public address/port.
 
 ## Storage and ICC Profiles
 
@@ -98,7 +109,7 @@ Mount ICC profiles at `/iccprofiles`. All files are copied to the Service-Client
 
 ```bash
 docker run -d --name csclient1 \
-  -e REPO_USER=repo_user -e REPO_PASS=repo_password -e VERSION=2023.1.1 \
+  -e REPO_USER=repo_user -e REPO_PASS=repo_password -e VERSION=2025.2.0 \
   -e SVC_USER=user -e SVC_PASS=password -e SVC_HOST=host.example.com \
   -v "${PWD}/custom_iccprofiles:/iccprofiles" \
   cs-image-tools:v1.0
@@ -126,7 +137,7 @@ Run example using `VOLUMES_INFO` and a mounted host path for assets:
 
 ```bash
 docker run -d --name csclient1 \
-  -e REPO_USER=repo_user -e REPO_PASS=repo_password -e VERSION=2023.1.1 \
+  -e REPO_USER=repo_user -e REPO_PASS=repo_password -e VERSION=2025.2.0 \
   -e SVC_USER=user -e SVC_PASS=password -e SVC_HOST=host.example.com \
   -e VOLUMES_INFO='{"assets": {"physicalurl": "file:///assets/", "filestreaming": false}, "assets-temp": {"physicalurl": "file:///assets/assets-temp/", "filestreaming": false}, "assets-s3": {"endpoint": "s3.amazon.com", "bucket-name": "assets-s3", "secret": "foobar"}, "temp": {"physicalurl": "file:///opt/corpus/work/temp/", "filestreaming": true}}' \
   -v /opt/corpus/work/assets:/assets \
@@ -140,7 +151,7 @@ Use Collabora Online to create previews for office documents. Example `docker-co
 ```yaml
 services:
   censhare-service-client:
-    image: cs-service-client:2023.1.1
+    image: cs-service-client:2025.2.0
     environment:
       SVC_USER: 'service-client'
       SVC_PASS: 'password'
@@ -172,10 +183,10 @@ When you pass `VERSION` during image build, the Dockerfile fetches and installs 
 
 | Tool         | Version   |
 |--------------|-----------|
-| ImageMagick  | 7.1.2-7   |
+| ImageMagick  | 7.1.2-9   |
 | Ghostscript  | 10.06.0   |
 | ExifTool     | 13.36     |
-| FFmpeg       | 8.0       |
+| FFmpeg       | 8.0.1     |
 | pngquant     | 3.0.3     |
 | wkhtmltoimage| 0.12.6.1-2|
 

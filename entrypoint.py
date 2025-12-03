@@ -15,6 +15,7 @@ import urllib3
 from urllib3.exceptions import HTTPError
 import json
 import hashlib
+import socket
 
 JAVA_WINDOWS = [
     (202201, 11),
@@ -24,6 +25,7 @@ JAVA_DEFAULT = 21
 
 CLIENT_VERSION_FILE = "/opt/corpus/censhare/client-version.txt"
 SERVICECLIENT_SCRIPT = "/opt/corpus/censhare/censhare-Service-Client/serviceclient.sh"
+DEFAULT_RMI_PORT = "30550"
 
 def _determine_serviceclient_version(script_path=SERVICECLIENT_SCRIPT):
     """
@@ -48,6 +50,38 @@ def str_to_bool(value):
     Defaults to False for any other value.
     """
     return value.lower() in ['true', '1', 't', 'y', 'yes']
+
+def detect_rmi_host_ip():
+    """
+    Best-effort detection of the IP the JVM will embed in RMI stubs.
+    Tries hostname resolution (InetAddress.getLocalHost equivalent) first,
+    then falls back to the default route source address.
+    """
+    candidates = []
+    try:
+        hostname = socket.gethostname()
+        _, _, addrs = socket.gethostbyname_ex(hostname)
+        candidates.extend(addrs)
+    except socket.gaierror:
+        pass
+
+    try:
+        route_cmd = "ip -4 route get 1 2>/dev/null | awk '{print $7; exit}'"
+        route_ip = subprocess.check_output(
+            route_cmd,
+            shell=True,
+            text=True,
+            executable='/bin/bash',
+        ).strip()
+        if route_ip:
+            candidates.append(route_ip)
+    except subprocess.SubprocessError:
+        pass
+
+    for ip in candidates:
+        if ip and not ip.startswith("127."):
+            return ip
+    return None
 
 def download_unpack(url, output_path):
     """
@@ -78,7 +112,11 @@ def download_unpack(url, output_path):
             print(f"  {name.upper()}: {hasher.hexdigest()}")
         print("Unpacking...")
         with tarfile.open(output_path) as tar:
-            tar.extractall(path="/opt/corpus/")
+            try:
+                tar.extractall(path="/opt/corpus/", filter="data")
+            except TypeError:
+                # Fallback for older Python versions without the filter argument.
+                tar.extractall(path="/opt/corpus/")
         print("Unpacking complete.")
         subprocess.run(['chown', '-R', 'corpus:corpus', '/opt/corpus/'], check=True)
         detected_version = _determine_serviceclient_version()
@@ -187,13 +225,14 @@ def ensure_corretto(jdk_major):
     else:
         print("Warning: Java binary not found after installation.")
 
-def configure_xml(svc_host, svc_user):
+def configure_xml(svc_host, svc_user, base_dir="/opt/corpus/censhare/censhare-Service-Client"):
     """
     Updates XML configuration for the service client based on environment variables.
 
     Args:
     svc_host (str): Hostname of the service.
     svc_user (str): Username for service authentication.
+    base_dir (str): Base path of the Service-Client installation.
 
     Note:
     Facility-specific timeouts can be set via environment variables, e.g.:
@@ -203,25 +242,55 @@ def configure_xml(svc_host, svc_user):
     # General service configuration
     svc_instances = os.getenv('SVC_INSTANCES', '4')
     office_url = os.getenv('OFFICE_URL', '')
+    callback_host = os.getenv('SERVICECLIENT_CALLBACK_HOST', '').strip()
+
+    rmi_port_raw = os.getenv('SERVICECLIENT_RMI_PORT', DEFAULT_RMI_PORT)
+    if str(rmi_port_raw).isdigit():
+        rmi_port = str(rmi_port_raw)
+    else:
+        print(f"Warning: SERVICECLIENT_RMI_PORT '{rmi_port_raw}' is not numeric. Falling back to {DEFAULT_RMI_PORT}.")
+        rmi_port = DEFAULT_RMI_PORT
+    print(f"Configuring Service-Client RMI port mapping to {rmi_port}.")
 
     # Connection details
-    client_map_host_from = os.getenv('CLIENT_MAP_HOST_FROM', '')
-    client_map_host_to = os.getenv('CLIENT_MAP_HOST_TO', '')
-    client_map_port_from = os.getenv('CLIENT_MAP_PORT_FROM', '0')
-    client_map_port_to = os.getenv('CLIENT_MAP_PORT_TO', '0')
+    client_map_host_from = os.getenv('CLIENT_MAP_HOST_FROM', '').strip()
+    client_map_host_to = os.getenv('CLIENT_MAP_HOST_TO', '').strip()
+    client_map_port_from = os.getenv('CLIENT_MAP_PORT_FROM', '').strip()
+    client_map_port_to = os.getenv('CLIENT_MAP_PORT_TO', '').strip()
+
+    if callback_host and not client_map_host_to:
+        client_map_host_to = callback_host
+    if callback_host:
+        print(f"Callback host requested via SERVICECLIENT_CALLBACK_HOST: {callback_host}")
+
+    if not client_map_port_from:
+        client_map_port_from = rmi_port
+    if not client_map_port_to:
+        client_map_port_to = client_map_port_from
+
+    if callback_host and not client_map_host_from:
+        detected = detect_rmi_host_ip()
+        if detected:
+            client_map_host_from = detected
+            print(f"Detected RMI host '{detected}' for client-map-host-from to support callback mapping.")
+        else:
+            print("Warning: Unable to detect RMI host for callback mapping; client-map-host-from left empty.")
 
     # XML file path
-    path = f"/opt/corpus/censhare/censhare-Service-Client/config/.hosts/{svc_host}/serviceclient-preferences-{svc_user}.xml"
+    path = f"{base_dir}/config/.hosts/{svc_host}/serviceclient-preferences-{svc_user}.xml"
     tree = ET.parse(path)
     root = tree.getroot()
 
-    # Update connection settings
-    connection = root.find('.//connection[@type="standard"]')
+    # Update connection settings (force port-range to keep listeners in a fixed window)
+    connection = root.find('.//connection[@type="port-range"]') or root.find('.//connection[@type="standard"]')
     if connection is not None:
+        connection.set('type', 'port-range')
         connection.set('client-map-host-from', client_map_host_from)
         connection.set('client-map-host-to', client_map_host_to)
         connection.set('client-map-port-from', client_map_port_from)
         connection.set('client-map-port-to', client_map_port_to)
+    else:
+        print("Warning: No <connection> element found in serviceclient preferences.")
 
     # Update facilities instances
     facilities = root.find(".//facilities")
@@ -239,7 +308,7 @@ def configure_xml(svc_host, svc_user):
         key = facility.attrib['key']
         update_facility_paths(facility, key, office_url)
 
-    update_volumes_configuration("/opt/corpus/censhare/censhare-Service-Client/config/hosts.xml")
+    update_volumes_configuration(f"{base_dir}/config/hosts.xml")
 
     tree.write(path)
     print("XML configuration updated.")
