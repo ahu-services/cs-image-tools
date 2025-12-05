@@ -88,6 +88,8 @@ def test_configure_xml_sets_port_range_and_mapping(monkeypatch, tmp_path):
 
     monkeypatch.setenv("SERVICECLIENT_CALLBACK_HOST", "198.51.100.10")
     monkeypatch.setenv("SERVICECLIENT_RMI_PORT", "40000")
+    monkeypatch.setenv("SERVICECLIENT_RMI_PORT_TO", "40010")
+    monkeypatch.setenv("SERVICECLIENT_JAVA_OPTIONS", "-Xmx512m")
     monkeypatch.delenv("CLIENT_MAP_HOST_FROM", raising=False)
     monkeypatch.delenv("CLIENT_MAP_HOST_TO", raising=False)
     monkeypatch.delenv("CLIENT_MAP_PORT_FROM", raising=False)
@@ -100,22 +102,56 @@ def test_configure_xml_sets_port_range_and_mapping(monkeypatch, tmp_path):
     connection = tree.getroot().find(".//connection")
 
     assert connection.get("type") == "port-range"
-    assert connection.get("client-map-port-from") == "40000"
-    assert connection.get("client-map-port-to") == "40000"
-    assert connection.get("client-map-host-to") == "198.51.100.10"
-    assert connection.get("client-map-host-from") == "10.0.0.5"
+    assert connection.get("server-port-range-from") == "40000"
+    assert connection.get("server-port-range-to") == "40010"
+    assert connection.get("client-map-port-from") == ""
+    assert connection.get("client-map-port-to") == ""
+    assert connection.get("client-map-host-to") == ""
+    assert connection.get("client-map-host-from") == ""
+    assert entrypoint.os.getenv("SERVICECLIENT_JAVA_OPTIONS") == "-Xmx512m -Djava.rmi.server.hostname=198.51.100.10"
 
 
 def test_configure_xml_defaults_to_constant_port(monkeypatch, tmp_path):
     prefs_path = _write_minimal_preferences(tmp_path, "host2", "user2")
 
     monkeypatch.setenv("SERVICECLIENT_RMI_PORT", "not-a-number")
+    monkeypatch.setenv("SERVICECLIENT_RMI_PORT_TO", "also-not-a-number")
+    monkeypatch.delenv("SERVICECLIENT_JAVA_OPTIONS", raising=False)
     monkeypatch.delenv("SERVICECLIENT_CALLBACK_HOST", raising=False)
+    monkeypatch.setattr(entrypoint, "detect_rmi_host_ip", lambda: "10.0.0.9")
 
     entrypoint.configure_xml("host2", "user2", base_dir=str(tmp_path))
 
     tree = ET.parse(prefs_path)
     connection = tree.getroot().find(".//connection")
 
-    assert connection.get("client-map-port-from") == entrypoint.DEFAULT_RMI_PORT
-    assert connection.get("client-map-port-to") == entrypoint.DEFAULT_RMI_PORT
+    assert connection.get("server-port-range-from") == entrypoint.DEFAULT_RMI_PORT
+    assert connection.get("server-port-range-to") == entrypoint.DEFAULT_RMI_PORT
+    assert connection.get("client-map-port-from") == ""
+    assert connection.get("client-map-port-to") == ""
+    assert connection.get("client-map-host-from") == ""
+    assert connection.get("client-map-host-to") == ""
+    assert entrypoint.os.getenv("SERVICECLIENT_JAVA_OPTIONS") == "-Djava.rmi.server.hostname=10.0.0.9"
+
+
+def test_configure_xml_respects_explicit_client_mapping(monkeypatch, tmp_path):
+    prefs_path = _write_minimal_preferences(tmp_path, "host3", "user3")
+
+    monkeypatch.setenv("CLIENT_MAP_HOST_FROM", "10.0.0.7")
+    monkeypatch.setenv("CLIENT_MAP_HOST_TO", "203.0.113.77")
+    monkeypatch.setenv("CLIENT_MAP_PORT_FROM", "32123")
+    monkeypatch.delenv("CLIENT_MAP_PORT_TO", raising=False)
+    monkeypatch.delenv("SERVICECLIENT_CALLBACK_HOST", raising=False)
+    monkeypatch.delenv("SERVICECLIENT_JAVA_OPTIONS", raising=False)
+    monkeypatch.setattr(entrypoint, "detect_rmi_host_ip", lambda: "10.0.0.15")
+
+    entrypoint.configure_xml("host3", "user3", base_dir=str(tmp_path))
+
+    tree = ET.parse(prefs_path)
+    connection = tree.getroot().find(".//connection")
+
+    assert connection.get("client-map-host-from") == "10.0.0.7"
+    assert connection.get("client-map-host-to") == "203.0.113.77"
+    assert connection.get("client-map-port-from") == "32123"
+    assert connection.get("client-map-port-to") == "32123"
+    assert entrypoint.os.getenv("SERVICECLIENT_JAVA_OPTIONS") == "-Djava.rmi.server.hostname=10.0.0.15"
