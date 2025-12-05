@@ -26,6 +26,7 @@ JAVA_DEFAULT = 21
 CLIENT_VERSION_FILE = "/opt/corpus/censhare/client-version.txt"
 SERVICECLIENT_SCRIPT = "/opt/corpus/censhare/censhare-Service-Client/serviceclient.sh"
 DEFAULT_RMI_PORT = "30550"
+RMI_HOST_OPTION_PATTERN = re.compile(r"-Djava\.rmi\.server\.hostname=([^\s]+)")
 
 def _determine_serviceclient_version(script_path=SERVICECLIENT_SCRIPT):
     """
@@ -82,6 +83,34 @@ def detect_rmi_host_ip():
         if ip and not ip.startswith("127."):
             return ip
     return None
+
+def apply_rmi_callback_host(callback_host):
+    """
+    Ensure SERVICECLIENT_JAVA_OPTIONS contains the desired RMI hostname.
+    Priority: explicit SERVICECLIENT_CALLBACK_HOST, existing JAVA options,
+    then autodetected host IP.
+    """
+    java_opts = os.getenv('SERVICECLIENT_JAVA_OPTIONS', '').strip()
+    existing_match = RMI_HOST_OPTION_PATTERN.search(java_opts)
+    existing_host = existing_match.group(1) if existing_match else None
+
+    desired_host = callback_host or existing_host or detect_rmi_host_ip()
+    if not desired_host:
+        print("Warning: Unable to determine callback host for SERVICECLIENT_JAVA_OPTIONS.")
+        return
+
+    cleaned_opts = RMI_HOST_OPTION_PATTERN.sub('', java_opts).strip()
+    rmi_option = f"-Djava.rmi.server.hostname={desired_host}"
+    combined_opts = " ".join(part for part in [cleaned_opts, rmi_option] if part)
+    os.environ['SERVICECLIENT_JAVA_OPTIONS'] = combined_opts
+
+    if callback_host:
+        source = "SERVICECLIENT_CALLBACK_HOST"
+    elif existing_host:
+        source = "existing SERVICECLIENT_JAVA_OPTIONS"
+    else:
+        source = "detected host IP"
+    print(f"Configured SERVICECLIENT_JAVA_OPTIONS ({source}): {combined_opts}")
 
 def download_unpack(url, output_path):
     """
@@ -243,6 +272,9 @@ def configure_xml(svc_host, svc_user, base_dir="/opt/corpus/censhare/censhare-Se
     svc_instances = os.getenv('SVC_INSTANCES', '4')
     office_url = os.getenv('OFFICE_URL', '')
     callback_host = os.getenv('SERVICECLIENT_CALLBACK_HOST', '').strip()
+    if callback_host:
+        print(f"Callback host requested via SERVICECLIENT_CALLBACK_HOST: {callback_host}")
+    apply_rmi_callback_host(callback_host)
 
     rmi_port_raw = os.getenv('SERVICECLIENT_RMI_PORT', DEFAULT_RMI_PORT)
     if str(rmi_port_raw).isdigit():
@@ -250,7 +282,17 @@ def configure_xml(svc_host, svc_user, base_dir="/opt/corpus/censhare/censhare-Se
     else:
         print(f"Warning: SERVICECLIENT_RMI_PORT '{rmi_port_raw}' is not numeric. Falling back to {DEFAULT_RMI_PORT}.")
         rmi_port = DEFAULT_RMI_PORT
-    print(f"Configuring Service-Client RMI port mapping to {rmi_port}.")
+
+    rmi_port_to_raw = os.getenv('SERVICECLIENT_RMI_PORT_TO', '').strip()
+    if rmi_port_to_raw:
+        if rmi_port_to_raw.isdigit():
+            rmi_port_to = rmi_port_to_raw
+        else:
+            print(f"Warning: SERVICECLIENT_RMI_PORT_TO '{rmi_port_to_raw}' is not numeric. Falling back to {rmi_port}.")
+            rmi_port_to = rmi_port
+    else:
+        rmi_port_to = rmi_port
+    print(f"Configuring Service-Client server port range {rmi_port}-{rmi_port_to}.")
 
     # Connection details
     client_map_host_from = os.getenv('CLIENT_MAP_HOST_FROM', '').strip()
@@ -258,23 +300,10 @@ def configure_xml(svc_host, svc_user, base_dir="/opt/corpus/censhare/censhare-Se
     client_map_port_from = os.getenv('CLIENT_MAP_PORT_FROM', '').strip()
     client_map_port_to = os.getenv('CLIENT_MAP_PORT_TO', '').strip()
 
-    if callback_host and not client_map_host_to:
-        client_map_host_to = callback_host
-    if callback_host:
-        print(f"Callback host requested via SERVICECLIENT_CALLBACK_HOST: {callback_host}")
-
-    if not client_map_port_from:
-        client_map_port_from = rmi_port
-    if not client_map_port_to:
+    if client_map_port_from and not client_map_port_to:
         client_map_port_to = client_map_port_from
-
-    if callback_host and not client_map_host_from:
-        detected = detect_rmi_host_ip()
-        if detected:
-            client_map_host_from = detected
-            print(f"Detected RMI host '{detected}' for client-map-host-from to support callback mapping.")
-        else:
-            print("Warning: Unable to detect RMI host for callback mapping; client-map-host-from left empty.")
+    if client_map_port_to and not client_map_port_from:
+        client_map_port_from = client_map_port_to
 
     # XML file path
     path = f"{base_dir}/config/.hosts/{svc_host}/serviceclient-preferences-{svc_user}.xml"
@@ -289,6 +318,8 @@ def configure_xml(svc_host, svc_user, base_dir="/opt/corpus/censhare/censhare-Se
         connection.set('client-map-host-to', client_map_host_to)
         connection.set('client-map-port-from', client_map_port_from)
         connection.set('client-map-port-to', client_map_port_to)
+        connection.set('server-port-range-from', rmi_port)
+        connection.set('server-port-range-to', rmi_port_to)
     else:
         print("Warning: No <connection> element found in serviceclient preferences.")
 

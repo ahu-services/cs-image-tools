@@ -62,10 +62,11 @@ Note: If an `iccprofiles` folder exists in the build context, it is copied into 
 - `SVC_USER`: Username for the Service-Client connection/config.
 - `SVC_PASS`: Password for the Service-Client.
 - `SVC_HOST`: Hostname or IP of the censhare server to connect to.
-- `SERVICECLIENT_RMI_PORT`: Fixed RMI listener port (port-range from/to). Default `30550`.
-- `SERVICECLIENT_CALLBACK_HOST`: Optional public/host IP or DNS name to embed in callbacks; when set, the entrypoint auto-fills `client-map-host-from` with the detected container IP and maps to this value.
-- `CLIENT_MAP_HOST_FROM` / `CLIENT_MAP_HOST_TO`: Override the RMI host mapping baked into the stub (advanced NAT/PAT).
-- `CLIENT_MAP_PORT_FROM` / `CLIENT_MAP_PORT_TO`: Override RMI port mapping if the external callback port differs.
+- `SERVICECLIENT_RMI_PORT`: RMI server port range start (also the default end). Default `30550`.
+- `SERVICECLIENT_RMI_PORT_TO`: Optional RMI server port range end; defaults to `SERVICECLIENT_RMI_PORT`.
+- `SERVICECLIENT_CALLBACK_HOST`: Optional public/host IP or DNS name for callbacks; the entrypoint injects `-Djava.rmi.server.hostname=<value>` into `SERVICECLIENT_JAVA_OPTIONS`. If unset, the container auto-detects its host IP (host networking assumed).
+- `CLIENT_MAP_HOST_FROM` / `CLIENT_MAP_HOST_TO`: Explicitly override the RMI host mapping baked into the stub (advanced NAT/PAT).
+- `CLIENT_MAP_PORT_FROM` / `CLIENT_MAP_PORT_TO`: Explicitly override RMI port mapping if the external callback port differs; otherwise left empty.
 - `SVC_INSTANCES`: Number of parallel worker instances. Default `4`.
 - `OFFICE_URL`: URL of an office conversion service. If unset or unreachable, office previews are disabled.
 - `OFFICE_VALIDATE_CERTS`: Validate SSL certificates for `OFFICE_URL`. Set to `false` to disable validation.
@@ -96,10 +97,10 @@ docker run -d --name csclient1 \
 
 ## Networking and callbacks
 
-- Default behavior switches to `port-range` mode and aligns the client-map port mapping to `SERVICECLIENT_RMI_PORT` (default `30550`). Allow inbound TCP on this port.
-- Host networking (`--network host`) is the simplest and default assumption; it avoids NAT rewrite requirements and lets the server call back directly.
-- If you must run in bridge/NAT mode, supply the externally reachable host/IP via `SERVICECLIENT_CALLBACK_HOST` and forward `SERVICECLIENT_RMI_PORT` to the container. The entrypoint sets `client-map-host-from` to the detected RMI host inside the container and maps to your provided callback host (ports are kept in sync unless you override the client-map port vars).
-- For complex NAT/PAT, override `CLIENT_MAP_HOST_FROM/TO` and `CLIENT_MAP_PORT_FROM/TO` explicitly so the RMI stub is rewritten to the right public address/port.
+- Default behavior switches to `port-range` mode and sets the server port window to `SERVICECLIENT_RMI_PORT`–`SERVICECLIENT_RMI_PORT_TO` (default `30550` for both). Allow inbound TCP on these ports.
+- Host networking (`--network host`) is the simplest and default assumption; the entrypoint auto-detects the host IP and injects it into `SERVICECLIENT_JAVA_OPTIONS` for RMI callbacks.
+- In bridge/NAT mode, set `SERVICECLIENT_CALLBACK_HOST` to the externally reachable host/IP and forward the RMI port(s) accordingly; the entrypoint maps this into `SERVICECLIENT_JAVA_OPTIONS`.
+- For complex NAT/PAT, override `CLIENT_MAP_HOST_FROM/TO` and `CLIENT_MAP_PORT_FROM/TO` explicitly so the RMI stub is rewritten to the right public address/port (otherwise these stay blank).
 
 ## Storage and ICC Profiles
 
