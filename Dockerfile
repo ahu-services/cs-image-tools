@@ -1,8 +1,8 @@
 # TODO build gslib
 # TODO build dmr https://github.com/ImageMagick/MagickCache
 
-### Create base image for others
-FROM debian:trixie-slim AS debian-builder
+### Create base image for others (Debian 13.2)
+FROM debian:13.2-slim AS debian-builder
 
 RUN apt-get update && apt-get install -y wget build-essential libtool pkg-config \
     libfreetype-dev libfontconfig-dev libbz2-dev libzip-dev libzstd-dev \
@@ -48,7 +48,7 @@ RUN apt-get update && apt-get install -y cmake ninja-build clang libjpeg-dev \
 
 ### Build ImageMagick
 FROM debian-builder AS im-builder
-ARG IMAGEMAGICK_VERSION=7.1.2-9
+ARG IMAGEMAGICK_VERSION=7.1.2-10
 
 # Download ImageMagick
 WORKDIR /tmp
@@ -179,14 +179,16 @@ COPY --from=ffmpeg-builder /ffmpeg-build/ /TOOLS/
 COPY --from=pngquant-builder /pngquant-build/ /TOOLS/
 
 ### Final image
-FROM debian:trixie-slim as final
+FROM debian:13.2-slim AS final
+
 RUN set -eux; \
     apt-get update; \
     apt-get remove -y wpasupplicant; \
     apt-get upgrade -y; \
-    apt-get install -y --no-install-recommends iproute2 wget pkg-config libimage-exiftool-perl webp liblcms2-dev libxt-dev librsvg2-bin \
-    libopus-dev libdav1d-dev libraqm-dev libfftw3-dev libtool python3 python3-pip python3-psutil ca-certificates java-common \
-    libvpx-dev libx264-dev libx265-dev fontconfig libjpeg62-turbo libssl-dev xfonts-75dpi xfonts-base rawtherapee; \
+    apt-get install -y --no-install-recommends \
+        iproute2 wget pkg-config libimage-exiftool-perl webp liblcms2-dev libxt-dev librsvg2-bin \
+        libopus-dev libdav1d-dev libraqm-dev libfftw3-dev libtool python3 ca-certificates java-common \
+        libvpx-dev libx264-dev libx265-dev fontconfig libjpeg62-turbo libssl-dev xfonts-75dpi xfonts-base rawtherapee; \
     apt-get purge -y samba samba-libs smbclient libsmbclient winbind libwbclient0 cifs-utils || true; \
     apt-get upgrade -y; \
     apt-get autoremove -y
@@ -216,7 +218,11 @@ COPY --from=exif-builder /exif-build/usr/local/share/ //usr/local/share/
 RUN ldconfig; \
     groupadd -g 861 corpus; \
     useradd -d /opt/corpus -u 861 -g 861 -m  corpus; \
-    pip install requests --break-system-packages; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends python3-pip; \
+    pip3 install --no-cache-dir --break-system-packages "requests==2.32.3" "urllib3==2.6.0"; \
+    apt-get purge -y python3-pip; \
+    apt-get autoremove -y; \
     if ls /amazon-corretto-*-linux-jdk.deb >/dev/null 2>&1; then \
         apt-get install -y /amazon-corretto-*-linux-jdk.deb; \
         rm -f /amazon-corretto-*-linux-jdk.deb; \
@@ -232,8 +238,12 @@ COPY health_check.py /usr/local/bin/health_check.py
 
 
 ### Test Stage
-FROM final as test
-RUN pip3 install pytest --break-system-packages
+FROM final AS test
+ENV PYTHONPATH="/usr/local/bin"
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends python3-pytest; \
+    rm -rf /var/lib/apt/lists/*
 COPY tests/test_installation.py /test_installation.py
 COPY tests/test_health_check.py /test_health_check.py
 
@@ -241,8 +251,6 @@ CMD ["pytest", "-v", "/test_installation.py", "/test_health_check.py"]
 
 ### Release
 FROM final
-# Expose Service-Client Ports
-EXPOSE 30543 30544 30545
 # Define health check
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD python3 /usr/local/bin/health_check.py
 
