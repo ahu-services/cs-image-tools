@@ -62,7 +62,7 @@
   <policy domain="resource" name="disk" value="10GiB"/>
   <!-- Set the maximum length of an image sequence.  When this limit is
        exceeded, an exception is thrown. -->
-  <policy domain="resource" name="list-length" value="32"/>
+  <policy domain="resource" name="list-length" value="256"/>
   <!-- Set the maximum width of an image.  When this limit is exceeded, an
        exception is thrown. -->
   <policy domain="resource" name="width" value="20KP"/>
