@@ -45,7 +45,7 @@ def test_ghostscript_installed_and_version():
 
 def test_imagemagick_installed_and_version():
     """Test that ImageMagick is installed, executable, and the version is correct."""
-    expected_version = '7.1.2-10'
+    expected_version = '7.1.2-13'
     expected_features = 'Features: Cipher DPC HDRI Modules OpenMP(4.5)'
     expected_delegagtes = 'Delegates (built-in): bzlib cairo djvu fftw fontconfig fpx freetype gvc heic jbig jng jp2 jpeg jxl lcms ltdl lzma openexr pangocairo png raqm raw rsvg tiff uhdr webp wmf xml zip zlib zstd'
 
@@ -70,7 +70,7 @@ def test_imagemagick_installed_and_version():
 
 def test_exiftool_installed_and_version():
     """Test that ExifTool is installed, executable, and the version is correct."""
-    expected_version = '13.36'
+    expected_version = '13.44'
     try:
         # Check if 'exiftool' command is available and get version
         result = subprocess.run(['/usr/local/bin/exiftool', '-ver'], capture_output=True, text=True, check=True)
