@@ -1,8 +1,8 @@
 # TODO build gslib
 # TODO build dmr https://github.com/ImageMagick/MagickCache
 
-### Create base image for others (Debian 13.2)
-FROM debian:13.2-slim AS debian-builder
+### Create base image for others (Debian 13.3)
+FROM debian:13.3-slim AS debian-builder
 
 RUN apt-get update && apt-get install -y wget build-essential libtool pkg-config \
     libfreetype-dev libfontconfig-dev libbz2-dev libzip-dev libzstd-dev \
@@ -48,7 +48,7 @@ RUN apt-get update && apt-get install -y cmake ninja-build clang libjpeg-dev \
 
 ### Build ImageMagick
 FROM debian-builder AS im-builder
-ARG IMAGEMAGICK_VERSION=7.1.2-10
+ARG IMAGEMAGICK_VERSION=7.1.2-13
 
 # Download ImageMagick
 WORKDIR /tmp
@@ -93,7 +93,7 @@ RUN wget https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz \
 
 ### Build ExifTool
 FROM debian-builder AS exif-builder
-ARG EXIF_VERSION=13.36
+ARG EXIF_VERSION=13.44
 
 # Download and build ExifTool
 WORKDIR /tmp
@@ -179,7 +179,7 @@ COPY --from=ffmpeg-builder /ffmpeg-build/ /TOOLS/
 COPY --from=pngquant-builder /pngquant-build/ /TOOLS/
 
 ### Final image
-FROM debian:13.2-slim AS final
+FROM debian:13.3-slim AS final
 
 RUN set -eux; \
     apt-get update; \
