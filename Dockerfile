@@ -186,7 +186,7 @@ RUN set -eux; \
     apt-get remove -y wpasupplicant; \
     apt-get upgrade -y; \
     apt-get install -y --no-install-recommends \
-        iproute2 wget pkg-config libimage-exiftool-perl webp liblcms2-dev libxt-dev librsvg2-bin \
+        iproute2 wget pkg-config libimage-exiftool-perl webp liblcms2-dev libxt-dev librsvg2-bin potrace \
         libopus-dev libdav1d-dev libraqm-dev libfftw3-dev libtool python3 ca-certificates java-common \
         libvpx-dev libx264-dev libx265-dev fontconfig libjpeg62-turbo libssl-dev xfonts-75dpi xfonts-base rawtherapee; \
     apt-get purge -y samba samba-libs smbclient libsmbclient winbind libwbclient0 cifs-utils || true; \

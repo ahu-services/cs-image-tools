@@ -91,6 +91,10 @@
   <policy domain="delegate" rights="read|execute" pattern="gs"/>
   <policy domain="delegate" rights="read|execute" pattern="tesseract"/>
   <policy domain="delegate" rights="read|execute" pattern="dot"/>
+  <!-- Required for raster-to-vector conversions (e.g. output SVG via TRACE delegate). -->
+  <policy domain="delegate" rights="read|execute" pattern="potrace"/>
+  <policy domain="delegate" rights="read|execute" pattern="trace"/>
+  <policy domain="delegate" rights="read|execute" pattern="TRACE"/>
   <!-- Do not permit any image filters to load. -->
   <policy domain="filter" rights="none" pattern="*"/>
   <!-- Don't read/write from/to stdin/stdout. -->
@@ -100,6 +104,7 @@
   <!-- Indirect reads are not permitted. -->
   <policy domain="path" rights="none" pattern="@*"/>
   <!-- These image types are security risks on read, but write is fine -->
+  <policy domain="coder" rights="write" pattern="SVG"/>
   <policy domain="module" rights="write" pattern="{MSL,MVG,PS,SVG,URL,XPS}"/>
   <!-- This policy sets the number of times to replace content of certain
        memory buffers and temporary files before they are freed or deleted. -->
