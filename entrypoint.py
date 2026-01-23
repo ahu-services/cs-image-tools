@@ -349,7 +349,7 @@ def get_path_map():
         'imagemagick': ('@@CONVERT@@', '/usr/local/bin/magick', '@@COMPOSITE@@', '/usr/local/bin/composite'),
         'exiftool': ('@@EXIFTOOL@@', '/usr/local/bin/exiftool'),
         'ghostscript': ('@@GS@@', '/usr/local/bin/gs'),
-        'wkhtmltoimage': ('@@HTML2IMG@@', '/usr/bin/wkhtmltoimage'),
+        'wkhtmltoimage': ('@@HTML2IMG@@', '/usr/local/bin/wkhtmltoimage'),
         'pngquant': ('@@PNGQUANT@@', '/usr/local/bin/pngquant'),
         'ffmpeg': ('@@FFMPEG-PATH@@', '/usr/local/bin/ffmpeg'),
     }
@@ -368,6 +368,7 @@ def update_facility_paths(facility, key, office_url):
     # Update paths based on facility key
     if key in path_map:
         paths = path_map[key]
+        target_paths = []
         for i in range(0, len(paths), 2):
             path_element = facility.find(f".//path[@key='{paths[i]}']")
             if path_element is not None:
@@ -375,7 +376,14 @@ def update_facility_paths(facility, key, office_url):
             else:
                 # If the path element doesn't exist, create it
                 ET.SubElement(facility, 'path', {'key': paths[i], 'path': paths[i + 1]})
+            target_paths.append(paths[i + 1])
         print(f"Updated paths for facility '{key}'.")
+
+        if key != "office" and target_paths:
+            binaries_exist = all(os.path.exists(path) and os.access(path, os.X_OK) for path in target_paths)
+            if binaries_exist and facility.get('enabled') != 'true':
+                facility.set('enabled', 'true')
+                print(f"Enabled facility '{key}' (binaries present).")
 
     # Handle specific facilities like 'office'
     if key == "office":
