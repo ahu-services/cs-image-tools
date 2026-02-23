@@ -184,9 +184,9 @@ When you pass `VERSION` during image build, the Dockerfile fetches and installs 
 
 | Tool         | Version   |
 |--------------|-----------|
-| ImageMagick  | 7.1.2-13  |
+| ImageMagick  | 7.1.2-15  |
 | Ghostscript  | 10.06.0   |
-| ExifTool     | 13.44     |
+| ExifTool     | 13.51    |
 | FFmpeg       | 8.0.1     |
 | pngquant     | 3.0.3     |
 | wkhtmltoimage| 0.12.6.1-2|

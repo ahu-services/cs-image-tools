@@ -48,7 +48,7 @@ RUN apt-get update && apt-get install -y cmake ninja-build clang libjpeg-dev \
 
 ### Build ImageMagick
 FROM debian-builder AS im-builder
-ARG IMAGEMAGICK_VERSION=7.1.2-13
+ARG IMAGEMAGICK_VERSION=7.1.2-15
 
 # Download ImageMagick
 WORKDIR /tmp
@@ -93,7 +93,7 @@ RUN wget https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz \
 
 ### Build ExifTool
 FROM debian-builder AS exif-builder
-ARG EXIF_VERSION=13.44
+ARG EXIF_VERSION=13.51
 
 # Download and build ExifTool
 WORKDIR /tmp
