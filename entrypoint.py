@@ -26,6 +26,9 @@ JAVA_DEFAULT = 21
 CLIENT_VERSION_FILE = "/opt/corpus/censhare/client-version.txt"
 SERVICECLIENT_SCRIPT = "/opt/corpus/censhare/censhare-Service-Client/serviceclient.sh"
 DEFAULT_RMI_PORT = "30550"
+DEFAULT_IMAGEMAGICK_POLICY_PATH = "/usr/local/etc/ImageMagick-7/policy.xml"
+MIB = 1024 * 1024
+GIB = 1024 * MIB
 RMI_HOST_OPTION_PATTERN = re.compile(r"-Djava\.rmi\.server\.hostname=([^\s]+)")
 
 def _determine_serviceclient_version(script_path=SERVICECLIENT_SCRIPT):
@@ -51,6 +54,143 @@ def str_to_bool(value):
     Defaults to False for any other value.
     """
     return value.lower() in ['true', '1', 't', 'y', 'yes']
+
+def _read_first_line(path):
+    try:
+        with open(path, 'r', encoding='utf-8') as handle:
+            return handle.readline().strip()
+    except OSError:
+        return None
+
+def _parse_positive_int(value, default):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
+
+def _clamp(value, minimum, maximum):
+    return max(minimum, min(value, maximum))
+
+def _round_down(value, step):
+    return max(step, (value // step) * step)
+
+def _format_binary_size(value):
+    if value % GIB == 0:
+        return f"{value // GIB}GiB"
+    return f"{max(1, value // MIB)}MiB"
+
+def detect_container_memory_limit_bytes():
+    """
+    Reads the effective container memory limit from cgroup v2/v1.
+    Returns None when the container is effectively unlimited.
+    """
+    for path in (
+        "/sys/fs/cgroup/memory.max",
+        "/sys/fs/cgroup/memory/memory.limit_in_bytes",
+    ):
+        raw_value = _read_first_line(path)
+        if not raw_value or raw_value == "max":
+            continue
+        try:
+            limit = int(raw_value)
+        except ValueError:
+            continue
+        if 0 < limit < (1 << 60):
+            return limit
+    return None
+
+def recommend_imagemagick_policy(memory_limit_bytes, svc_instances):
+    """
+    Derive conservative ImageMagick cache limits from the container memory limit.
+    Reserve headroom for the JVM, the service client, and non-ImageMagick tools.
+    """
+    workers = max(1, svc_instances)
+    reserve = min(max(int(memory_limit_bytes * 0.20), 768 * MIB), int(memory_limit_bytes * 0.35))
+    usable_bytes = max(memory_limit_bytes - reserve, 512 * MIB)
+    per_worker_budget = max(usable_bytes // workers, 256 * MIB)
+
+    memory_limit = _round_down(_clamp(int(per_worker_budget * 0.33), 256 * MIB, 1 * GIB), 64 * MIB)
+    map_limit = _round_down(_clamp(int(per_worker_budget * 0.66), 512 * MIB, 2 * GIB), 64 * MIB)
+    max_memory_request = _round_down(_clamp(memory_limit // 2, 128 * MIB, 512 * MIB), 64 * MIB)
+    disk_limit = _round_down(_clamp(max(int(usable_bytes * 1.5), 2 * GIB), 2 * GIB, 10 * GIB), 256 * MIB)
+    thread_limit = "1" if workers > 1 else "2"
+
+    return {
+        "thread": thread_limit,
+        "memory": _format_binary_size(memory_limit),
+        "map": _format_binary_size(max(map_limit, memory_limit)),
+        "disk": _format_binary_size(disk_limit),
+        "max-memory-request": _format_binary_size(max_memory_request),
+    }
+
+def _set_policy_value(root, domain, name, value):
+    policy = root.find(f"./policy[@domain='{domain}'][@name='{name}']")
+    if policy is None:
+        policy = ET.SubElement(root, 'policy', {'domain': domain, 'name': name})
+    policy.set('value', str(value))
+
+def configure_imagemagick_policy(policy_path=DEFAULT_IMAGEMAGICK_POLICY_PATH):
+    """
+    Tune the installed ImageMagick policy for the current container and allow
+    explicit environment overrides for operators that need deterministic limits.
+    """
+    if not os.path.exists(policy_path):
+        print(f"Warning: ImageMagick policy file not found at {policy_path}")
+        return
+
+    try:
+        tree = ET.parse(policy_path)
+    except ET.ParseError as exc:
+        print(f"Warning: Unable to parse ImageMagick policy {policy_path}: {exc}")
+        return
+
+    root = tree.getroot()
+    svc_instances = _parse_positive_int(os.getenv('SVC_INSTANCES', '4'), 4)
+    auto_config = str_to_bool(os.getenv('IMAGEMAGICK_POLICY_AUTOCONFIG', 'true'))
+    detected_limit = detect_container_memory_limit_bytes()
+
+    applied_values = {}
+    if auto_config and detected_limit is not None:
+        applied_values.update(recommend_imagemagick_policy(detected_limit, svc_instances))
+        print(
+            "Auto-configuring ImageMagick policy from container memory limit "
+            f"{_format_binary_size(detected_limit)} and SVC_INSTANCES={svc_instances}."
+        )
+    elif auto_config:
+        print("No finite container memory limit detected; keeping bundled ImageMagick policy defaults.")
+    else:
+        print("ImageMagick policy auto-configuration disabled.")
+
+    override_mapping = {
+        "thread": "IMAGEMAGICK_POLICY_THREAD",
+        "time": "IMAGEMAGICK_POLICY_TIME",
+        "memory": "IMAGEMAGICK_POLICY_MEMORY",
+        "map": "IMAGEMAGICK_POLICY_MAP",
+        "disk": "IMAGEMAGICK_POLICY_DISK",
+        "area": "IMAGEMAGICK_POLICY_AREA",
+        "file": "IMAGEMAGICK_POLICY_FILE",
+        "list-length": "IMAGEMAGICK_POLICY_LIST_LENGTH",
+        "width": "IMAGEMAGICK_POLICY_WIDTH",
+        "height": "IMAGEMAGICK_POLICY_HEIGHT",
+    }
+    for policy_name, env_name in override_mapping.items():
+        env_value = os.getenv(env_name)
+        if env_value:
+            applied_values[policy_name] = env_value.strip()
+
+    max_memory_request = os.getenv('IMAGEMAGICK_POLICY_MAX_MEMORY_REQUEST')
+    if max_memory_request:
+        applied_values["max-memory-request"] = max_memory_request.strip()
+
+    for policy_name, value in applied_values.items():
+        domain = 'system' if policy_name == 'max-memory-request' else 'resource'
+        _set_policy_value(root, domain, policy_name, value)
+
+    tree.write(policy_path, encoding='utf-8', xml_declaration=True)
+    if applied_values:
+        rendered = ", ".join(f"{key}={value}" for key, value in sorted(applied_values.items()))
+        print(f"Configured ImageMagick policy: {rendered}")
 
 def detect_rmi_host_ip():
     """
@@ -670,6 +810,7 @@ if __name__ == "__main__":
 
     required_jdk_major = select_jdk_major(client_version)
     ensure_corretto(required_jdk_major)
+    configure_imagemagick_policy()
 
     # Install custom iccprofiles if provided in build
     icc_source = "/build_iccprofiles"

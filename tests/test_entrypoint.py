@@ -155,3 +155,70 @@ def test_configure_xml_respects_explicit_client_mapping(monkeypatch, tmp_path):
     assert connection.get("client-map-port-from") == "32123"
     assert connection.get("client-map-port-to") == "32123"
     assert entrypoint.os.getenv("SERVICECLIENT_JAVA_OPTIONS") == "-Djava.rmi.server.hostname=10.0.0.15"
+
+
+def _write_minimal_policy(policy_path: Path):
+    policy_path.write_text(
+        """<?xml version="1.0" encoding="UTF-8"?>
+<policymap>
+  <policy domain="resource" name="thread" value="1"/>
+  <policy domain="resource" name="memory" value="1GiB"/>
+  <policy domain="resource" name="map" value="1GiB"/>
+  <policy domain="resource" name="disk" value="4GiB"/>
+  <policy domain="system" name="max-memory-request" value="256MiB"/>
+</policymap>
+"""
+    )
+
+
+def test_detect_container_memory_limit_bytes_prefers_finite_values(monkeypatch):
+    values = {
+        "/sys/fs/cgroup/memory.max": "max",
+        "/sys/fs/cgroup/memory/memory.limit_in_bytes": str(6 * entrypoint.GIB),
+    }
+    monkeypatch.setattr(entrypoint, "_read_first_line", lambda path: values.get(path))
+
+    assert entrypoint.detect_container_memory_limit_bytes() == 6 * entrypoint.GIB
+
+
+def test_configure_imagemagick_policy_autoconfigures_from_memory_limit(monkeypatch, tmp_path):
+    policy_path = tmp_path / "policy.xml"
+    _write_minimal_policy(policy_path)
+    monkeypatch.setenv("SVC_INSTANCES", "4")
+    monkeypatch.delenv("IMAGEMAGICK_POLICY_MEMORY", raising=False)
+    monkeypatch.delenv("IMAGEMAGICK_POLICY_MAP", raising=False)
+    monkeypatch.delenv("IMAGEMAGICK_POLICY_THREAD", raising=False)
+    monkeypatch.delenv("IMAGEMAGICK_POLICY_MAX_MEMORY_REQUEST", raising=False)
+    monkeypatch.setattr(entrypoint, "detect_container_memory_limit_bytes", lambda: 6 * entrypoint.GIB)
+
+    entrypoint.configure_imagemagick_policy(str(policy_path))
+
+    expected = entrypoint.recommend_imagemagick_policy(6 * entrypoint.GIB, 4)
+    tree = ET.parse(policy_path)
+    root = tree.getroot()
+
+    assert root.find("./policy[@domain='resource'][@name='thread']").get("value") == expected["thread"]
+    assert root.find("./policy[@domain='resource'][@name='memory']").get("value") == expected["memory"]
+    assert root.find("./policy[@domain='resource'][@name='map']").get("value") == expected["map"]
+    assert root.find("./policy[@domain='resource'][@name='disk']").get("value") == expected["disk"]
+    assert root.find("./policy[@domain='system'][@name='max-memory-request']").get("value") == expected["max-memory-request"]
+
+
+def test_configure_imagemagick_policy_allows_explicit_overrides(monkeypatch, tmp_path):
+    policy_path = tmp_path / "policy.xml"
+    _write_minimal_policy(policy_path)
+    monkeypatch.setenv("IMAGEMAGICK_POLICY_AUTOCONFIG", "false")
+    monkeypatch.setenv("IMAGEMAGICK_POLICY_THREAD", "2")
+    monkeypatch.setenv("IMAGEMAGICK_POLICY_MEMORY", "768MiB")
+    monkeypatch.setenv("IMAGEMAGICK_POLICY_MAP", "1536MiB")
+    monkeypatch.setenv("IMAGEMAGICK_POLICY_MAX_MEMORY_REQUEST", "384MiB")
+
+    entrypoint.configure_imagemagick_policy(str(policy_path))
+
+    tree = ET.parse(policy_path)
+    root = tree.getroot()
+
+    assert root.find("./policy[@domain='resource'][@name='thread']").get("value") == "2"
+    assert root.find("./policy[@domain='resource'][@name='memory']").get("value") == "768MiB"
+    assert root.find("./policy[@domain='resource'][@name='map']").get("value") == "1536MiB"
+    assert root.find("./policy[@domain='system'][@name='max-memory-request']").get("value") == "384MiB"
