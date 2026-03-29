@@ -16,7 +16,7 @@ RUN apt-get install ca-certificates
 
 ### Build Ghostscript
 FROM debian-builder AS ghostscript-builder
-ARG GHOSTSCRIPT_VERSION=10.06.0
+ARG GHOSTSCRIPT_VERSION=10.07.0
 
 # Download and build Ghostscript
 WORKDIR /tmp
@@ -48,7 +48,7 @@ RUN apt-get update && apt-get install -y cmake ninja-build clang libjpeg-dev \
 
 ### Build ImageMagick
 FROM debian-builder AS im-builder
-ARG IMAGEMAGICK_VERSION=7.1.2-13
+ARG IMAGEMAGICK_VERSION=7.1.2-18
 
 # Download ImageMagick
 WORKDIR /tmp
@@ -79,7 +79,7 @@ COPY imagemagick-policy.xml /IM-build/usr/local/etc/ImageMagick-7/policy.xml
 
 ### Build ffmpeg
 FROM debian-builder AS ffmpeg-builder
-ARG FFMPEG_VERSION=8.0.1
+ARG FFMPEG_VERSION=8.1
 
 # Download and build ffmpeg
 WORKDIR /tmp
@@ -93,7 +93,7 @@ RUN wget https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz \
 
 ### Build ExifTool
 FROM debian-builder AS exif-builder
-ARG EXIF_VERSION=13.44
+ARG EXIF_VERSION=13.50
 
 # Download and build ExifTool
 WORKDIR /tmp
