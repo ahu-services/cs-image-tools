@@ -161,11 +161,11 @@ def _write_minimal_policy(policy_path: Path):
     policy_path.write_text(
         """<?xml version="1.0" encoding="UTF-8"?>
 <policymap>
-  <policy domain="resource" name="thread" value="1"/>
-  <policy domain="resource" name="memory" value="1GiB"/>
-  <policy domain="resource" name="map" value="1GiB"/>
-  <policy domain="resource" name="disk" value="4GiB"/>
-  <policy domain="system" name="max-memory-request" value="256MiB"/>
+  <policy domain="resource" name="thread" value="2"/>
+  <policy domain="resource" name="memory" value="2GiB"/>
+  <policy domain="resource" name="map" value="4GiB"/>
+  <policy domain="resource" name="disk" value="10GiB"/>
+  <policy domain="system" name="max-memory-request" value="1GiB"/>
 </policymap>
 """
     )
@@ -184,6 +184,7 @@ def test_detect_container_memory_limit_bytes_prefers_finite_values(monkeypatch):
 def test_configure_imagemagick_policy_autoconfigures_from_memory_limit(monkeypatch, tmp_path):
     policy_path = tmp_path / "policy.xml"
     _write_minimal_policy(policy_path)
+    monkeypatch.setenv("IMAGEMAGICK_POLICY_AUTOCONFIG", "true")
     monkeypatch.setenv("SVC_INSTANCES", "4")
     monkeypatch.delenv("IMAGEMAGICK_POLICY_MEMORY", raising=False)
     monkeypatch.delenv("IMAGEMAGICK_POLICY_MAP", raising=False)
@@ -202,6 +203,25 @@ def test_configure_imagemagick_policy_autoconfigures_from_memory_limit(monkeypat
     assert root.find("./policy[@domain='resource'][@name='map']").get("value") == expected["map"]
     assert root.find("./policy[@domain='resource'][@name='disk']").get("value") == expected["disk"]
     assert root.find("./policy[@domain='system'][@name='max-memory-request']").get("value") == expected["max-memory-request"]
+
+
+def test_configure_imagemagick_policy_keeps_bundled_defaults_by_default(monkeypatch, tmp_path):
+    policy_path = tmp_path / "policy.xml"
+    _write_minimal_policy(policy_path)
+    monkeypatch.delenv("IMAGEMAGICK_POLICY_AUTOCONFIG", raising=False)
+    monkeypatch.setenv("SVC_INSTANCES", "4")
+    monkeypatch.setattr(entrypoint, "detect_container_memory_limit_bytes", lambda: 6 * entrypoint.GIB)
+
+    entrypoint.configure_imagemagick_policy(str(policy_path))
+
+    tree = ET.parse(policy_path)
+    root = tree.getroot()
+
+    assert root.find("./policy[@domain='resource'][@name='thread']").get("value") == "2"
+    assert root.find("./policy[@domain='resource'][@name='memory']").get("value") == "2GiB"
+    assert root.find("./policy[@domain='resource'][@name='map']").get("value") == "4GiB"
+    assert root.find("./policy[@domain='resource'][@name='disk']").get("value") == "10GiB"
+    assert root.find("./policy[@domain='system'][@name='max-memory-request']").get("value") == "1GiB"
 
 
 def test_configure_imagemagick_policy_allows_explicit_overrides(monkeypatch, tmp_path):

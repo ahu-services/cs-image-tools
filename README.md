@@ -68,7 +68,7 @@ Note: If an `iccprofiles` folder exists in the build context, it is copied into 
 - `CLIENT_MAP_HOST_FROM` / `CLIENT_MAP_HOST_TO`: Explicitly override the RMI host mapping baked into the stub (advanced NAT/PAT).
 - `CLIENT_MAP_PORT_FROM` / `CLIENT_MAP_PORT_TO`: Explicitly override RMI port mapping if the external callback port differs; otherwise left empty.
 - `SVC_INSTANCES`: Number of parallel worker instances. Default `4`.
-- `IMAGEMAGICK_POLICY_AUTOCONFIG`: Auto-tune ImageMagick limits from the detected container memory limit. Default `true`.
+- `IMAGEMAGICK_POLICY_AUTOCONFIG`: Auto-tune ImageMagick limits from the detected container memory limit. Default `false`.
 - `IMAGEMAGICK_POLICY_MEMORY`, `IMAGEMAGICK_POLICY_MAP`, `IMAGEMAGICK_POLICY_DISK`, `IMAGEMAGICK_POLICY_THREAD`, `IMAGEMAGICK_POLICY_MAX_MEMORY_REQUEST`: Optional explicit overrides for ImageMagick resource limits.
 - `OFFICE_URL`: URL of an office conversion service. If unset or unreachable, office previews are disabled.
 - `OFFICE_VALIDATE_CERTS`: Validate SSL certificates for `OFFICE_URL`. Set to `false` to disable validation.

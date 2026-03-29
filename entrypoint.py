@@ -147,7 +147,7 @@ def configure_imagemagick_policy(policy_path=DEFAULT_IMAGEMAGICK_POLICY_PATH):
 
     root = tree.getroot()
     svc_instances = _parse_positive_int(os.getenv('SVC_INSTANCES', '4'), 4)
-    auto_config = str_to_bool(os.getenv('IMAGEMAGICK_POLICY_AUTOCONFIG', 'true'))
+    auto_config = str_to_bool(os.getenv('IMAGEMAGICK_POLICY_AUTOCONFIG', 'false'))
     detected_limit = detect_container_memory_limit_bytes()
 
     applied_values = {}
