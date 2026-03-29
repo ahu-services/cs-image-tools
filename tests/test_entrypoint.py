@@ -242,3 +242,35 @@ def test_configure_imagemagick_policy_allows_explicit_overrides(monkeypatch, tmp
     assert root.find("./policy[@domain='resource'][@name='memory']").get("value") == "768MiB"
     assert root.find("./policy[@domain='resource'][@name='map']").get("value") == "1536MiB"
     assert root.find("./policy[@domain='system'][@name='max-memory-request']").get("value") == "384MiB"
+
+
+def _facility_xml(key, enabled="false", path_key=None, path_value=None):
+    facility = ET.Element("facility", {"key": key, "enabled": enabled})
+    if path_key and path_value:
+        ET.SubElement(facility, "path", {"key": path_key, "label": key, "path": path_value})
+    return facility
+
+
+def test_update_facility_paths_sets_wkhtmltoimage_path_and_enables(monkeypatch):
+    facility = _facility_xml("wkhtmltoimage", enabled="false", path_key="@@HTML2IMG@@", path_value="/usr/bin/wkhtmltoimage")
+
+    monkeypatch.setattr(entrypoint.os.path, "exists", lambda path: path == "/usr/local/bin/wkhtmltoimage")
+    monkeypatch.setattr(entrypoint.os, "access", lambda path, mode: path == "/usr/local/bin/wkhtmltoimage")
+
+    entrypoint.update_facility_paths(facility, "wkhtmltoimage", office_url="")
+
+    path_element = facility.find(".//path[@key='@@HTML2IMG@@']")
+    assert path_element is not None
+    assert path_element.get("path") == "/usr/local/bin/wkhtmltoimage"
+    assert facility.get("enabled") == "true"
+
+
+def test_update_facility_paths_enables_ffmpeg_when_present(monkeypatch):
+    facility = _facility_xml("ffmpeg", enabled="false", path_key="@@FFMPEG-PATH@@", path_value="/usr/local/bin/ffmpeg")
+
+    monkeypatch.setattr(entrypoint.os.path, "exists", lambda path: path == "/usr/local/bin/ffmpeg")
+    monkeypatch.setattr(entrypoint.os, "access", lambda path, mode: path == "/usr/local/bin/ffmpeg")
+
+    entrypoint.update_facility_paths(facility, "ffmpeg", office_url="")
+
+    assert facility.get("enabled") == "true"
