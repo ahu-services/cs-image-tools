@@ -1,5 +1,9 @@
 # censhare-Service-Client Docker Configuration
 
+> Production hardening and rendering experiments for censhare image tooling in containerized Service-Client workflows.
+
+[![Support via bunq](https://img.shields.io/badge/Support-bunq-00A1E0?style=flat-square&logo=bunq&logoColor=white)](https://bunq.me/ahu)
+
 This repository provides a Docker image and entrypoint to run the censhare-Service-Client with a consistent, containerized setup. It supports dynamic configuration at runtime or pre-configuration during image build.
 
 ## Overview
@@ -203,6 +207,10 @@ Delegates (built-in): bzlib cairo djvu fftw fontconfig fpx freetype gvc heic jbi
 ## Customization
 
 You can adjust the behavior in `entrypoint.py` and the Dockerfile to fit your needs. The entrypoint handles environment variables for flexible runtime configuration.
+
+## Support
+
+Voluntary support helps fund ongoing freelance maintenance of this repository. Support payments are appreciated but do not automatically create an entitlement to support, feature delivery, consulting, SLA, or invoice-based engagement.
 
 ## License
 
