@@ -2,6 +2,10 @@
 
 > Production hardening and rendering experiments for censhare image tooling in containerized Service-Client workflows.
 
+[![Docker](https://img.shields.io/badge/Container-Docker-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/)
+[![Java](https://img.shields.io/badge/Java-11%2F17%2F21-007396?logo=openjdk&logoColor=white)](https://openjdk.org/)
+[![License](https://img.shields.io/github/license/ahu-services/cs-image-tools)](LICENSE)
+
 [![Support via bunq](https://img.shields.io/badge/Support-bunq-00A1E0?style=flat-square&logo=bunq&logoColor=white)](https://bunq.me/ahu)
 
 This repository provides a Docker image and entrypoint to run the censhare-Service-Client with a consistent, containerized setup. It supports dynamic configuration at runtime or pre-configuration during image build.
