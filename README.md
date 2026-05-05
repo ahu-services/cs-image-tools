@@ -1,4 +1,4 @@
-# censhare-Service-Client Docker Configuration
+# cs-image-tools
 
 > Production hardening and rendering experiments for censhare image tooling in containerized Service-Client workflows.
 
