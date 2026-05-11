@@ -18,6 +18,10 @@ This repository provides a Docker image and entrypoint to run the censhare-Servi
 - Graceful shutdown handling for data integrity
 - Automatic Java runtime selection (Corretto 11/17/21) matching Service-Client version
 
+## Public artifact hygiene
+
+This repo includes a pre-commit/CI guard for public-facing text. See [docs/public-artifact-hygiene.md](docs/public-artifact-hygiene.md) for setup, failure interpretation, fixes, and reruns.
+
 ## Prerequisites
 
 - Docker installed: see https://docs.docker.com/get-docker/

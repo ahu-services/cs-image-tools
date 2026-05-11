@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: public-artifact-hygiene
+        name: public-artifact-hygiene
+        entry: python3 scripts/public_artifact_guard.py
+        language: system
+        pass_filenames: true
+        files: ^(?:\.pre-commit-config\.yaml|README(?:\.[^/]+)?|CHANGELOG(?:\.[^/]+)?|SECURITY(?:\.[^/]+)?|CONTRIBUTING(?:\.[^/]+)?|docs/|.*\.(?:md|markdown|rst|txt|json|toml))$

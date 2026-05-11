@@ -12,9 +12,25 @@ permissions:
   contents: read
 
 jobs:
+  public-artifact-hygiene:
+    name: Public artifact hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install pre-commit
+        run: python3 -m pip install --user pre-commit
+
+      - name: Run public artifact guard
+        run: python3 -m pre_commit run public-artifact-hygiene --all-files
+
   lint:
     name: Dockerfile and shell lint
     runs-on: ubuntu-latest
+    needs: public-artifact-hygiene
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
