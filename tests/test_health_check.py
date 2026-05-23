@@ -1,3 +1,4 @@
+import contextlib
 import socketserver
 import threading
 import time
@@ -7,10 +8,8 @@ import health_check
 
 class _NoopHandler(socketserver.BaseRequestHandler):
     def handle(self):
-        try:
+        with contextlib.suppress(Exception):
             self.request.recv(1)
-        except Exception:
-            pass
 
 
 def test_resolve_rmi_port_defaults(monkeypatch):

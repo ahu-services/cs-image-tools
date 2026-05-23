@@ -1,21 +1,22 @@
+import hashlib
+import json
 import os
 import platform
 import re
-import shutil
 import shlex
-import time
-import requests
-import tarfile
-import sys
-import subprocess
+import shutil
 import signal
+import socket
+import subprocess
+import sys
+import tarfile
+import time
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
+
+import requests
 import urllib3
 from urllib3.exceptions import HTTPError
-import json
-import hashlib
-import socket
 
 JAVA_WINDOWS = [
     (202201, 11),
@@ -31,13 +32,14 @@ MIB = 1024 * 1024
 GIB = 1024 * MIB
 RMI_HOST_OPTION_PATTERN = re.compile(r"-Djava\.rmi\.server\.hostname=([^\s]+)")
 
+
 def _determine_serviceclient_version(script_path=SERVICECLIENT_SCRIPT):
     """
     Extract the service client version marker from the serviceclient.sh script.
     """
-    version_pattern = re.compile(r'-Dcenshare\.serviceclient\.version=([\w\.\-]+)')
+    version_pattern = re.compile(r"-Dcenshare\.serviceclient\.version=([\w\.\-]+)")
     try:
-        with open(script_path, 'r', encoding='utf-8') as handle:
+        with open(script_path, encoding="utf-8") as handle:
             for line in handle:
                 match = version_pattern.search(line)
                 if match:
@@ -46,6 +48,7 @@ def _determine_serviceclient_version(script_path=SERVICECLIENT_SCRIPT):
         print(f"Warning: Unable to read {script_path} for version detection: {exc}")
     return None
 
+
 def str_to_bool(value):
     """
     Convert a string to a boolean.
@@ -53,14 +56,16 @@ def str_to_bool(value):
     Returns False for 'false', '0', 'f', 'n', 'no' (case insensitive).
     Defaults to False for any other value.
     """
-    return value.lower() in ['true', '1', 't', 'y', 'yes']
+    return value.lower() in ["true", "1", "t", "y", "yes"]
+
 
 def _read_first_line(path):
     try:
-        with open(path, 'r', encoding='utf-8') as handle:
+        with open(path, encoding="utf-8") as handle:
             return handle.readline().strip()
     except OSError:
         return None
+
 
 def _parse_positive_int(value, default):
     try:
@@ -69,16 +74,20 @@ def _parse_positive_int(value, default):
         return default
     return parsed if parsed > 0 else default
 
+
 def _clamp(value, minimum, maximum):
     return max(minimum, min(value, maximum))
 
+
 def _round_down(value, step):
     return max(step, (value // step) * step)
+
 
 def _format_binary_size(value):
     if value % GIB == 0:
         return f"{value // GIB}GiB"
     return f"{max(1, value // MIB)}MiB"
+
 
 def detect_container_memory_limit_bytes():
     """
@@ -100,20 +109,31 @@ def detect_container_memory_limit_bytes():
             return limit
     return None
 
+
 def recommend_imagemagick_policy(memory_limit_bytes, svc_instances):
     """
     Derive conservative ImageMagick cache limits from the container memory limit.
     Reserve headroom for the JVM, the service client, and non-ImageMagick tools.
     """
     workers = max(1, svc_instances)
-    reserve = min(max(int(memory_limit_bytes * 0.20), 768 * MIB), int(memory_limit_bytes * 0.35))
+    reserve = min(
+        max(int(memory_limit_bytes * 0.20), 768 * MIB), int(memory_limit_bytes * 0.35)
+    )
     usable_bytes = max(memory_limit_bytes - reserve, 512 * MIB)
     per_worker_budget = max(usable_bytes // workers, 256 * MIB)
 
-    memory_limit = _round_down(_clamp(int(per_worker_budget * 0.33), 256 * MIB, 1 * GIB), 64 * MIB)
-    map_limit = _round_down(_clamp(int(per_worker_budget * 0.66), 512 * MIB, 2 * GIB), 64 * MIB)
-    max_memory_request = _round_down(_clamp(memory_limit // 2, 128 * MIB, 512 * MIB), 64 * MIB)
-    disk_limit = _round_down(_clamp(max(int(usable_bytes * 1.5), 2 * GIB), 2 * GIB, 10 * GIB), 256 * MIB)
+    memory_limit = _round_down(
+        _clamp(int(per_worker_budget * 0.33), 256 * MIB, 1 * GIB), 64 * MIB
+    )
+    map_limit = _round_down(
+        _clamp(int(per_worker_budget * 0.66), 512 * MIB, 2 * GIB), 64 * MIB
+    )
+    max_memory_request = _round_down(
+        _clamp(memory_limit // 2, 128 * MIB, 512 * MIB), 64 * MIB
+    )
+    disk_limit = _round_down(
+        _clamp(max(int(usable_bytes * 1.5), 2 * GIB), 2 * GIB, 10 * GIB), 256 * MIB
+    )
     thread_limit = "1" if workers > 1 else "2"
 
     return {
@@ -124,11 +144,13 @@ def recommend_imagemagick_policy(memory_limit_bytes, svc_instances):
         "max-memory-request": _format_binary_size(max_memory_request),
     }
 
+
 def _set_policy_value(root, domain, name, value):
     policy = root.find(f"./policy[@domain='{domain}'][@name='{name}']")
     if policy is None:
-        policy = ET.SubElement(root, 'policy', {'domain': domain, 'name': name})
-    policy.set('value', str(value))
+        policy = ET.SubElement(root, "policy", {"domain": domain, "name": name})
+    policy.set("value", str(value))
+
 
 def configure_imagemagick_policy(policy_path=DEFAULT_IMAGEMAGICK_POLICY_PATH):
     """
@@ -146,19 +168,23 @@ def configure_imagemagick_policy(policy_path=DEFAULT_IMAGEMAGICK_POLICY_PATH):
         return
 
     root = tree.getroot()
-    svc_instances = _parse_positive_int(os.getenv('SVC_INSTANCES', '4'), 4)
-    auto_config = str_to_bool(os.getenv('IMAGEMAGICK_POLICY_AUTOCONFIG', 'false'))
+    svc_instances = _parse_positive_int(os.getenv("SVC_INSTANCES", "4"), 4)
+    auto_config = str_to_bool(os.getenv("IMAGEMAGICK_POLICY_AUTOCONFIG", "false"))
     detected_limit = detect_container_memory_limit_bytes()
 
     applied_values = {}
     if auto_config and detected_limit is not None:
-        applied_values.update(recommend_imagemagick_policy(detected_limit, svc_instances))
+        applied_values.update(
+            recommend_imagemagick_policy(detected_limit, svc_instances)
+        )
         print(
             "Auto-configuring ImageMagick policy from container memory limit "
             f"{_format_binary_size(detected_limit)} and SVC_INSTANCES={svc_instances}."
         )
     elif auto_config:
-        print("No finite container memory limit detected; keeping bundled ImageMagick policy defaults.")
+        print(
+            "No finite container memory limit detected; keeping bundled ImageMagick policy defaults."
+        )
     else:
         print("ImageMagick policy auto-configuration disabled.")
 
@@ -179,18 +205,21 @@ def configure_imagemagick_policy(policy_path=DEFAULT_IMAGEMAGICK_POLICY_PATH):
         if env_value:
             applied_values[policy_name] = env_value.strip()
 
-    max_memory_request = os.getenv('IMAGEMAGICK_POLICY_MAX_MEMORY_REQUEST')
+    max_memory_request = os.getenv("IMAGEMAGICK_POLICY_MAX_MEMORY_REQUEST")
     if max_memory_request:
         applied_values["max-memory-request"] = max_memory_request.strip()
 
     for policy_name, value in applied_values.items():
-        domain = 'system' if policy_name == 'max-memory-request' else 'resource'
+        domain = "system" if policy_name == "max-memory-request" else "resource"
         _set_policy_value(root, domain, policy_name, value)
 
-    tree.write(policy_path, encoding='utf-8', xml_declaration=True)
+    tree.write(policy_path, encoding="utf-8", xml_declaration=True)
     if applied_values:
-        rendered = ", ".join(f"{key}={value}" for key, value in sorted(applied_values.items()))
+        rendered = ", ".join(
+            f"{key}={value}" for key, value in sorted(applied_values.items())
+        )
         print(f"Configured ImageMagick policy: {rendered}")
+
 
 def detect_rmi_host_ip():
     """
@@ -212,7 +241,7 @@ def detect_rmi_host_ip():
             route_cmd,
             shell=True,
             text=True,
-            executable='/bin/bash',
+            executable="/bin/bash",
         ).strip()
         if route_ip:
             candidates.append(route_ip)
@@ -224,25 +253,28 @@ def detect_rmi_host_ip():
             return ip
     return None
 
+
 def apply_rmi_callback_host(callback_host):
     """
     Ensure SERVICECLIENT_JAVA_OPTIONS contains the desired RMI hostname.
     Priority: explicit SERVICECLIENT_CALLBACK_HOST, existing JAVA options,
     then autodetected host IP.
     """
-    java_opts = os.getenv('SERVICECLIENT_JAVA_OPTIONS', '').strip()
+    java_opts = os.getenv("SERVICECLIENT_JAVA_OPTIONS", "").strip()
     existing_match = RMI_HOST_OPTION_PATTERN.search(java_opts)
     existing_host = existing_match.group(1) if existing_match else None
 
     desired_host = callback_host or existing_host or detect_rmi_host_ip()
     if not desired_host:
-        print("Warning: Unable to determine callback host for SERVICECLIENT_JAVA_OPTIONS.")
+        print(
+            "Warning: Unable to determine callback host for SERVICECLIENT_JAVA_OPTIONS."
+        )
         return
 
-    cleaned_opts = RMI_HOST_OPTION_PATTERN.sub('', java_opts).strip()
+    cleaned_opts = RMI_HOST_OPTION_PATTERN.sub("", java_opts).strip()
     rmi_option = f"-Djava.rmi.server.hostname={desired_host}"
     combined_opts = " ".join(part for part in [cleaned_opts, rmi_option] if part)
-    os.environ['SERVICECLIENT_JAVA_OPTIONS'] = combined_opts
+    os.environ["SERVICECLIENT_JAVA_OPTIONS"] = combined_opts
 
     if callback_host:
         source = "SERVICECLIENT_CALLBACK_HOST"
@@ -251,6 +283,7 @@ def apply_rmi_callback_host(callback_host):
     else:
         source = "detected host IP"
     print(f"Configured SERVICECLIENT_JAVA_OPTIONS ({source}): {combined_opts}")
+
 
 def download_unpack(url, output_path):
     """
@@ -267,10 +300,10 @@ def download_unpack(url, output_path):
     response = requests.get(url, stream=True)
     if response.status_code == 200:
         hashers = {
-            'md5': hashlib.md5(),
-            'sha256': hashlib.sha256(),
+            "md5": hashlib.md5(),
+            "sha256": hashlib.sha256(),
         }
-        with open(output_path, 'wb') as f:
+        with open(output_path, "wb") as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
                 for hasher in hashers.values():
@@ -287,32 +320,41 @@ def download_unpack(url, output_path):
                 # Fallback for older Python versions without the filter argument.
                 tar.extractall(path="/opt/corpus/")
         print("Unpacking complete.")
-        subprocess.run(['chown', '-R', 'corpus:corpus', '/opt/corpus/'], check=True)
+        subprocess.run(["chown", "-R", "corpus:corpus", "/opt/corpus/"], check=True)
         detected_version = _determine_serviceclient_version()
         if detected_version:
             print(f"Installed service client version: {detected_version}")
         else:
-            print("Warning: Could not determine installed service client version from serviceclient.sh.")
+            print(
+                "Warning: Could not determine installed service client version from serviceclient.sh."
+            )
     else:
         print("Failed to download the file.")
         sys.exit(1)
+
 
 def select_jdk_major(client_version):
     """
     Chooses the JDK major version for the given client version.
     """
     if not client_version:
-        print(f"Warning: censhare Service-Client version unknown, defaulting to JDK {JAVA_DEFAULT}.")
+        print(
+            f"Warning: censhare Service-Client version unknown, defaulting to JDK {JAVA_DEFAULT}."
+        )
         return JAVA_DEFAULT
-    parts = client_version.split('.')
+    parts = client_version.split(".")
     if len(parts) < 2:
-        print(f"Warning: Unexpected version format '{client_version}', defaulting to JDK {JAVA_DEFAULT}.")
+        print(
+            f"Warning: Unexpected version format '{client_version}', defaulting to JDK {JAVA_DEFAULT}."
+        )
         return JAVA_DEFAULT
     try:
         major = int(parts[0])
         minor = int(parts[1])
     except ValueError:
-        print(f"Warning: Unable to parse version '{client_version}', defaulting to JDK {JAVA_DEFAULT}.")
+        print(
+            f"Warning: Unable to parse version '{client_version}', defaulting to JDK {JAVA_DEFAULT}."
+        )
         return JAVA_DEFAULT
 
     release_key = major * 100 + minor
@@ -321,38 +363,53 @@ def select_jdk_major(client_version):
             return jdk
     return JAVA_DEFAULT
 
+
 def store_client_version(version):
     if not version:
         return
     try:
         os.makedirs(os.path.dirname(CLIENT_VERSION_FILE), exist_ok=True)
-        with open(CLIENT_VERSION_FILE, 'w') as handle:
+        with open(CLIENT_VERSION_FILE, "w") as handle:
             handle.write(version)
     except OSError as exc:
-        print(f"Warning: Unable to persist client version to {CLIENT_VERSION_FILE}: {exc}")
+        print(
+            f"Warning: Unable to persist client version to {CLIENT_VERSION_FILE}: {exc}"
+        )
+
 
 def ensure_corretto(jdk_major):
     """
     Installs (or reuses) the Corretto release that matches the requested major version.
     """
+
     def configure_java_environment(java_binary):
         java_home = os.path.dirname(os.path.dirname(os.path.realpath(java_binary)))
-        os.environ['JAVA_HOME'] = java_home
-        os.environ['JDK_HOME'] = java_home
-        os.environ['PATH'] = f"{os.path.join(java_home, 'bin')}:{os.environ.get('PATH', '')}"
+        os.environ["JAVA_HOME"] = java_home
+        os.environ["JDK_HOME"] = java_home
+        os.environ["PATH"] = (
+            f"{os.path.join(java_home, 'bin')}:{os.environ.get('PATH', '')}"
+        )
         try:
-            subprocess.run(['update-alternatives', '--set', 'java', java_binary], check=False)
-            javac_binary = os.path.join(java_home, 'bin', 'javac')
+            subprocess.run(
+                ["update-alternatives", "--set", "java", java_binary], check=False
+            )
+            javac_binary = os.path.join(java_home, "bin", "javac")
             if os.path.exists(javac_binary):
-                subprocess.run(['update-alternatives', '--set', 'javac', javac_binary], check=False)
+                subprocess.run(
+                    ["update-alternatives", "--set", "javac", javac_binary], check=False
+                )
         except FileNotFoundError:
-            print("update-alternatives not available; skipping alternative configuration.")
+            print(
+                "update-alternatives not available; skipping alternative configuration."
+            )
 
-    java_binary = shutil.which('java')
+    java_binary = shutil.which("java")
     current_major = None
     if java_binary:
         try:
-            result = subprocess.run([java_binary, '-version'], capture_output=True, text=True, check=True)
+            result = subprocess.run(
+                [java_binary, "-version"], capture_output=True, text=True, check=True
+            )
             match = re.search(r'version\s+"(\d+)', result.stderr + result.stdout)
             if match:
                 current_major = int(match.group(1))
@@ -372,29 +429,34 @@ def ensure_corretto(jdk_major):
     try:
         arch = arch_lookup[machine]
     except KeyError as exc:
-        raise RuntimeError(f"Unsupported architecture for Corretto JDK: {machine}") from exc
+        raise RuntimeError(
+            f"Unsupported architecture for Corretto JDK: {machine}"
+        ) from exc
 
     url = f"https://corretto.aws/downloads/latest/amazon-corretto-{jdk_major}-{arch}-linux-jdk.deb"
     deb_path = f"/tmp/amazon-corretto-{jdk_major}.deb"
     print(f"Installing Corretto JDK {jdk_major} from {url}...")
-    subprocess.run(['wget', '-q', '-O', deb_path, url], check=True)
+    subprocess.run(["wget", "-q", "-O", deb_path, url], check=True)
     try:
-        subprocess.run(['dpkg', '-i', deb_path], check=True)
+        subprocess.run(["dpkg", "-i", deb_path], check=True)
     except subprocess.CalledProcessError:
-        subprocess.run(['apt-get', 'update'], check=True)
-        subprocess.run(['apt-get', '-y', '-f', 'install'], check=True)
-        subprocess.run(['dpkg', '-i', deb_path], check=True)
+        subprocess.run(["apt-get", "update"], check=True)
+        subprocess.run(["apt-get", "-y", "-f", "install"], check=True)
+        subprocess.run(["dpkg", "-i", deb_path], check=True)
     finally:
         if os.path.exists(deb_path):
             os.remove(deb_path)
 
-    java_binary = shutil.which('java')
+    java_binary = shutil.which("java")
     if java_binary:
         configure_java_environment(java_binary)
     else:
         print("Warning: Java binary not found after installation.")
 
-def configure_xml(svc_host, svc_user, base_dir="/opt/corpus/censhare/censhare-Service-Client"):
+
+def configure_xml(
+    svc_host, svc_user, base_dir="/opt/corpus/censhare/censhare-Service-Client"
+):
     """
     Updates XML configuration for the service client based on environment variables.
 
@@ -409,36 +471,42 @@ def configure_xml(svc_host, svc_user, base_dir="/opt/corpus/censhare/censhare-Se
       VIDEO_TIMEOUT=1800
     """
     # General service configuration
-    svc_instances = os.getenv('SVC_INSTANCES', '4')
-    office_url = os.getenv('OFFICE_URL', '')
-    callback_host = os.getenv('SERVICECLIENT_CALLBACK_HOST', '').strip()
+    svc_instances = os.getenv("SVC_INSTANCES", "4")
+    office_url = os.getenv("OFFICE_URL", "")
+    callback_host = os.getenv("SERVICECLIENT_CALLBACK_HOST", "").strip()
     if callback_host:
-        print(f"Callback host requested via SERVICECLIENT_CALLBACK_HOST: {callback_host}")
+        print(
+            f"Callback host requested via SERVICECLIENT_CALLBACK_HOST: {callback_host}"
+        )
     apply_rmi_callback_host(callback_host)
 
-    rmi_port_raw = os.getenv('SERVICECLIENT_RMI_PORT', DEFAULT_RMI_PORT)
+    rmi_port_raw = os.getenv("SERVICECLIENT_RMI_PORT", DEFAULT_RMI_PORT)
     if str(rmi_port_raw).isdigit():
         rmi_port = str(rmi_port_raw)
     else:
-        print(f"Warning: SERVICECLIENT_RMI_PORT '{rmi_port_raw}' is not numeric. Falling back to {DEFAULT_RMI_PORT}.")
+        print(
+            f"Warning: SERVICECLIENT_RMI_PORT '{rmi_port_raw}' is not numeric. Falling back to {DEFAULT_RMI_PORT}."
+        )
         rmi_port = DEFAULT_RMI_PORT
 
-    rmi_port_to_raw = os.getenv('SERVICECLIENT_RMI_PORT_TO', '').strip()
+    rmi_port_to_raw = os.getenv("SERVICECLIENT_RMI_PORT_TO", "").strip()
     if rmi_port_to_raw:
         if rmi_port_to_raw.isdigit():
             rmi_port_to = rmi_port_to_raw
         else:
-            print(f"Warning: SERVICECLIENT_RMI_PORT_TO '{rmi_port_to_raw}' is not numeric. Falling back to {rmi_port}.")
+            print(
+                f"Warning: SERVICECLIENT_RMI_PORT_TO '{rmi_port_to_raw}' is not numeric. Falling back to {rmi_port}."
+            )
             rmi_port_to = rmi_port
     else:
         rmi_port_to = rmi_port
     print(f"Configuring Service-Client server port range {rmi_port}-{rmi_port_to}.")
 
     # Connection details
-    client_map_host_from = os.getenv('CLIENT_MAP_HOST_FROM', '').strip()
-    client_map_host_to = os.getenv('CLIENT_MAP_HOST_TO', '').strip()
-    client_map_port_from = os.getenv('CLIENT_MAP_PORT_FROM', '').strip()
-    client_map_port_to = os.getenv('CLIENT_MAP_PORT_TO', '').strip()
+    client_map_host_from = os.getenv("CLIENT_MAP_HOST_FROM", "").strip()
+    client_map_host_to = os.getenv("CLIENT_MAP_HOST_TO", "").strip()
+    client_map_port_from = os.getenv("CLIENT_MAP_PORT_FROM", "").strip()
+    client_map_port_to = os.getenv("CLIENT_MAP_PORT_TO", "").strip()
 
     if client_map_port_from and not client_map_port_to:
         client_map_port_to = client_map_port_from
@@ -446,37 +514,41 @@ def configure_xml(svc_host, svc_user, base_dir="/opt/corpus/censhare/censhare-Se
         client_map_port_from = client_map_port_to
 
     # XML file path
-    path = f"{base_dir}/config/.hosts/{svc_host}/serviceclient-preferences-{svc_user}.xml"
+    path = (
+        f"{base_dir}/config/.hosts/{svc_host}/serviceclient-preferences-{svc_user}.xml"
+    )
     tree = ET.parse(path)
     root = tree.getroot()
 
     # Update connection settings (force port-range to keep listeners in a fixed window)
-    connection = root.find('.//connection[@type="port-range"]') or root.find('.//connection[@type="standard"]')
+    connection = root.find('.//connection[@type="port-range"]') or root.find(
+        './/connection[@type="standard"]'
+    )
     if connection is not None:
-        connection.set('type', 'port-range')
-        connection.set('client-map-host-from', client_map_host_from)
-        connection.set('client-map-host-to', client_map_host_to)
-        connection.set('client-map-port-from', client_map_port_from)
-        connection.set('client-map-port-to', client_map_port_to)
-        connection.set('server-port-range-from', rmi_port)
-        connection.set('server-port-range-to', rmi_port_to)
+        connection.set("type", "port-range")
+        connection.set("client-map-host-from", client_map_host_from)
+        connection.set("client-map-host-to", client_map_host_to)
+        connection.set("client-map-port-from", client_map_port_from)
+        connection.set("client-map-port-to", client_map_port_to)
+        connection.set("server-port-range-from", rmi_port)
+        connection.set("server-port-range-to", rmi_port_to)
     else:
         print("Warning: No <connection> element found in serviceclient preferences.")
 
     # Update facilities instances
     facilities = root.find(".//facilities")
-    facilities.attrib['instances'] = svc_instances
+    facilities.attrib["instances"] = svc_instances
 
     # Optional: Override timeouts via environment variables
-    for facility in facilities.findall('.//facility'):
-        key = facility.attrib['key']
-        timeout_env_var = os.getenv(f'{key.upper()}_TIMEOUT')
+    for facility in facilities.findall(".//facility"):
+        key = facility.attrib["key"]
+        timeout_env_var = os.getenv(f"{key.upper()}_TIMEOUT")
         if timeout_env_var:
-            facility.set('timeout', timeout_env_var)
+            facility.set("timeout", timeout_env_var)
 
     # Update paths and other settings for each facility
-    for facility in facilities.findall('.//facility'):
-        key = facility.attrib['key']
+    for facility in facilities.findall(".//facility"):
+        key = facility.attrib["key"]
         update_facility_paths(facility, key, office_url)
 
     update_volumes_configuration(f"{base_dir}/config/hosts.xml")
@@ -484,15 +556,22 @@ def configure_xml(svc_host, svc_user, base_dir="/opt/corpus/censhare/censhare-Se
     tree.write(path)
     print("XML configuration updated.")
 
+
 def get_path_map():
     return {
-        'imagemagick': ('@@CONVERT@@', '/usr/local/bin/magick', '@@COMPOSITE@@', '/usr/local/bin/composite'),
-        'exiftool': ('@@EXIFTOOL@@', '/usr/local/bin/exiftool'),
-        'ghostscript': ('@@GS@@', '/usr/local/bin/gs'),
-        'wkhtmltoimage': ('@@HTML2IMG@@', '/usr/local/bin/wkhtmltoimage'),
-        'pngquant': ('@@PNGQUANT@@', '/usr/local/bin/pngquant'),
-        'ffmpeg': ('@@FFMPEG-PATH@@', '/usr/local/bin/ffmpeg'),
+        "imagemagick": (
+            "@@CONVERT@@",
+            "/usr/local/bin/magick",
+            "@@COMPOSITE@@",
+            "/usr/local/bin/composite",
+        ),
+        "exiftool": ("@@EXIFTOOL@@", "/usr/local/bin/exiftool"),
+        "ghostscript": ("@@GS@@", "/usr/local/bin/gs"),
+        "wkhtmltoimage": ("@@HTML2IMG@@", "/usr/local/bin/wkhtmltoimage"),
+        "pngquant": ("@@PNGQUANT@@", "/usr/local/bin/pngquant"),
+        "ffmpeg": ("@@FFMPEG-PATH@@", "/usr/local/bin/ffmpeg"),
     }
+
 
 def update_facility_paths(facility, key, office_url):
     """
@@ -512,23 +591,29 @@ def update_facility_paths(facility, key, office_url):
         for i in range(0, len(paths), 2):
             path_element = facility.find(f".//path[@key='{paths[i]}']")
             if path_element is not None:
-                path_element.set('path', paths[i + 1])
+                path_element.set("path", paths[i + 1])
             else:
                 # If the path element doesn't exist, create it
-                ET.SubElement(facility, 'path', {'key': paths[i], 'path': paths[i + 1]})
+                ET.SubElement(facility, "path", {"key": paths[i], "path": paths[i + 1]})
             target_paths.append(paths[i + 1])
         print(f"Updated paths for facility '{key}'.")
 
         if key != "office" and target_paths:
-            binaries_exist = all(os.path.exists(path) and os.access(path, os.X_OK) for path in target_paths)
-            if binaries_exist and facility.get('enabled') != 'true':
-                facility.set('enabled', 'true')
+            binaries_exist = all(
+                os.path.exists(path) and os.access(path, os.X_OK)
+                for path in target_paths
+            )
+            if binaries_exist and facility.get("enabled") != "true":
+                facility.set("enabled", "true")
                 print(f"Enabled facility '{key}' (binaries present).")
 
     # Handle specific facilities like 'office'
     if key == "office":
-        office_validate_certs = str_to_bool(os.getenv('OFFICE_VALIDATE_CERTS', 'true'))
-        handle_office_facility(facility, office_url, validate_certs=office_validate_certs)
+        office_validate_certs = str_to_bool(os.getenv("OFFICE_VALIDATE_CERTS", "true"))
+        handle_office_facility(
+            facility, office_url, validate_certs=office_validate_certs
+        )
+
 
 def handle_office_facility(facility, office_url, validate_certs=True):
     """
@@ -540,46 +625,47 @@ def handle_office_facility(facility, office_url, validate_certs=True):
     """
     if office_url:
         try:
-            http = urllib3.PoolManager(cert_reqs='CERT_REQUIRED' if validate_certs else 'CERT_NONE')
+            http = urllib3.PoolManager(
+                cert_reqs="CERT_REQUIRED" if validate_certs else "CERT_NONE"
+            )
             # Create a Multipart Encoder
-            fields = {
-                'file': ('test.txt', "foobar", 'text/plain')
-            }
+            fields = {"file": ("test.txt", "foobar", "text/plain")}
 
             # Encode the fields
             encoded_fields = urllib3.filepost.encode_multipart_formdata(fields)
             body, content_type = encoded_fields
 
-            headers = {
-                'Content-Type': content_type
-            }
+            headers = {"Content-Type": content_type}
 
             response = http.request(
-                'POST',
+                "POST",
                 office_url,
                 body=body,
                 headers=headers,
                 timeout=10,
-                retries=False
+                retries=False,
             )
 
             if response.status == 200:
                 path_element = facility.find(".//path[@key='@@OFFICE@@']")
                 if path_element is not None:
-                    path_element.set('port', office_url)
+                    path_element.set("port", office_url)
                 else:
-                    ET.SubElement(facility, 'path', {'key': '@@OFFICE@@', 'port': office_url})
+                    ET.SubElement(
+                        facility, "path", {"key": "@@OFFICE@@", "port": office_url}
+                    )
                 print(f"Successfully tested {office_url}, facility enabled.")
             else:
                 raise Exception(f"Non-200 status code received: {response.status}")
         except HTTPError as e:
             print(f"Failed to connect to OFFICE_URL: {e}")
-            facility.set('enabled', 'false')
+            facility.set("enabled", "false")
         except Exception as e:
             print(f"Unexpected error: {e}")
-            facility.set('enabled', 'false')
+            facility.set("enabled", "false")
     else:
-        facility.set('enabled', 'false')
+        facility.set("enabled", "false")
+
 
 def setup_icc_profiles(source_dir, target_dir):
     """
@@ -594,7 +680,7 @@ def setup_icc_profiles(source_dir, target_dir):
     if os.path.exists(source_dir) and os.listdir(source_dir):
         # Ensure the target directory exists; create if it doesn't
         os.makedirs(target_dir, exist_ok=True)
-        
+
         # Copy each file from the source to the target directory
         for filename in os.listdir(source_dir):
             source_file = os.path.join(source_dir, filename)
@@ -604,6 +690,7 @@ def setup_icc_profiles(source_dir, target_dir):
         print(f"Copied ICC profiles from {source_dir} to {target_dir}")
     else:
         print(f"No ICC profiles found in {source_dir} or directory does not exist.")
+
 
 def run_as_corpus(command, input_data=None):
     """
@@ -616,6 +703,7 @@ def run_as_corpus(command, input_data=None):
     Returns:
     subprocess.CompletedProcess: The result object including stdout, stderr, and exit status.
     """
+
     def _run(cmd):
         return subprocess.run(
             cmd,
@@ -626,11 +714,11 @@ def run_as_corpus(command, input_data=None):
         )
 
     try:
-        result = _run(['runuser', '-u', 'corpus', '--', *command])
+        result = _run(["runuser", "-u", "corpus", "--", *command])
     except FileNotFoundError:
         try:
             quoted_command = shlex.join(command)
-            result = _run(['su', '-s', '/bin/bash', 'corpus', '-c', quoted_command])
+            result = _run(["su", "-s", "/bin/bash", "corpus", "-c", quoted_command])
         except subprocess.CalledProcessError as e:
             print(f"Command failed with exit status {e.returncode}", file=sys.stderr)
             print(e.stderr, file=sys.stderr)
@@ -646,6 +734,7 @@ def run_as_corpus(command, input_data=None):
         print(result.stderr, file=sys.stderr)
     return result
 
+
 def stop_service_client():
     """
     Stops the censhare service client by gracefully terminating the Java process.
@@ -655,14 +744,16 @@ def stop_service_client():
     # Find the process ID of the ServiceClient
     pid_command = "jps | grep ServiceClient | cut -f 1 -d ' '"
     try:
-        pid = subprocess.check_output(pid_command, shell=True, executable='/bin/bash', text=True).strip()
+        pid = subprocess.check_output(
+            pid_command, shell=True, executable="/bin/bash", text=True
+        ).strip()
     except subprocess.CalledProcessError:
-        pid = ''
+        pid = ""
 
     if pid:
         # Send SIGTERM to the process
         stop_command = f"kill -TERM {pid}"
-        subprocess.run(stop_command, shell=True, executable='/bin/bash', text=True)
+        subprocess.run(stop_command, shell=True, executable="/bin/bash", text=True)
 
         # Wait for the process to terminate
         timeout = 120
@@ -675,10 +766,13 @@ def stop_service_client():
 
         if timeout == 0:
             print("Timeout reached. Forcefully terminating the service client...")
-            subprocess.run(f"kill -9 {pid}", shell=True, executable='/bin/bash', text=True)
+            subprocess.run(
+                f"kill -9 {pid}", shell=True, executable="/bin/bash", text=True
+            )
             print("Service client forcefully stopped.")
     else:
         print("No ServiceClient process found.")
+
 
 def signal_handler(sig, frame):
     """
@@ -691,6 +785,7 @@ def signal_handler(sig, frame):
     print("SIGTERM received, stopping services...")
     stop_service_client()
     sys.exit(0)
+
 
 def wait_for_log_file(log_file_path, timeout=60):
     """
@@ -713,6 +808,7 @@ def wait_for_log_file(log_file_path, timeout=60):
     print(f"Log file {log_file_path} found.")
     return True
 
+
 def follow_log_file(log_file_path):
     """
     Continuously reads and prints lines from a log file, similar to 'tail -f'.
@@ -720,13 +816,14 @@ def follow_log_file(log_file_path):
     Args:
     log_file_path (str): Path to the log file to follow.
     """
-    with open(log_file_path, 'r') as log_file:
+    with open(log_file_path) as log_file:
         while True:
             line = log_file.readline()
             if not line:
                 time.sleep(0.1)  # Sleep briefly to avoid busy loop
                 continue
             print(line.strip(), flush=True)
+
 
 def update_volumes_configuration(hosts_xml_path):
     """
@@ -735,7 +832,7 @@ def update_volumes_configuration(hosts_xml_path):
     Args:
     hosts_xml_path (str): Path to the hosts.xml file.
     """
-    volumes_info = os.getenv('VOLUMES_INFO')
+    volumes_info = os.getenv("VOLUMES_INFO")
     if not volumes_info:
         print("VOLUMES_INFO environment variable is not set.")
         return
@@ -750,33 +847,34 @@ def update_volumes_configuration(hosts_xml_path):
     root = tree.getroot()
 
     # Find and remove existing volumes elements
-    for host in root.findall('.//host'):
-        for volumes in host.findall('volumes'):
+    for host in root.findall(".//host"):
+        for volumes in host.findall("volumes"):
             host.remove(volumes)
 
         # Ensure <censhare-vfs use="0"/> element is present
-        if host.find('censhare-vfs') is None:
-            ET.SubElement(host, 'censhare-vfs', {'use': '0'})
+        if host.find("censhare-vfs") is None:
+            ET.SubElement(host, "censhare-vfs", {"use": "0"})
 
         # Add new volumes element to the host
-        volumes_element = ET.SubElement(host, 'volumes')
+        volumes_element = ET.SubElement(host, "volumes")
         for fs_name, attributes in volumes_info.items():
-            volume_element = ET.SubElement(volumes_element, 'volume')
-            volume_element.set('filesystemname', fs_name)
+            volume_element = ET.SubElement(volumes_element, "volume")
+            volume_element.set("filesystemname", fs_name)
             for attr_key, attr_value in attributes.items():
                 if isinstance(attr_value, bool):
                     attr_value = str(attr_value).lower()
                 volume_element.set(attr_key, str(attr_value))
 
     # Pretty-print the XML
-    xml_str = ET.tostring(root, encoding='utf-8')
+    xml_str = ET.tostring(root, encoding="utf-8")
     parsed = minidom.parseString(xml_str)
     pretty_xml_str = parsed.toprettyxml(indent="  ")
 
-    with open(hosts_xml_path, 'w') as f:
+    with open(hosts_xml_path, "w") as f:
         f.write(pretty_xml_str)
-    
+
     print("Volumes configuration updated.")
+
 
 if __name__ == "__main__":
     # Stop censhare Client on SIGTERM
@@ -789,7 +887,7 @@ if __name__ == "__main__":
     svc_host = os.getenv("SVC_HOST")
     if not all([svc_user, svc_pass, svc_host]):
         print("Required variables (SVC_USER, SVC_PASS, SVC_HOST) are not set.")
-        sys.exit(1)    
+        sys.exit(1)
 
     # Check if service client is pre-installed
     client_installed = os.path.exists("/opt/corpus/censhare/censhare-Service-Client")
@@ -799,7 +897,9 @@ if __name__ == "__main__":
         repo_pass = os.getenv("REPO_PASS")
         version = client_version_env
         if not all([repo_user, repo_pass, version]):
-            print("Service client not pre-installed and required variables (REPO_USER, REPO_PASS, VERSION) are not set.")
+            print(
+                "Service client not pre-installed and required variables (REPO_USER, REPO_PASS, VERSION) are not set."
+            )
             sys.exit(1)
 
         download_url = f"https://{repo_user}:{repo_pass}@rpm.censhare.com/censhare-release/censhare-Service/v{version}/Shell/censhare-Service-Client-v{version}.tar.gz"
@@ -811,7 +911,7 @@ if __name__ == "__main__":
         store_client_version(client_version)
     elif os.path.exists(CLIENT_VERSION_FILE):
         try:
-            with open(CLIENT_VERSION_FILE, 'r') as handle:
+            with open(CLIENT_VERSION_FILE) as handle:
                 client_version = handle.read().strip()
         except OSError:
             client_version = None
@@ -823,11 +923,11 @@ if __name__ == "__main__":
     # Install custom iccprofiles if provided in build
     icc_source = "/build_iccprofiles"
     icc_target = "/opt/corpus/censhare/censhare-Service-Client/iccprofiles"
-    setup_icc_profiles(icc_source, icc_target)       
+    setup_icc_profiles(icc_source, icc_target)
     # Install custom iccprofiles if mounted
     icc_source = "/iccprofiles"
     icc_target = "/opt/corpus/censhare/censhare-Service-Client/iccprofiles"
-    setup_icc_profiles(icc_source, icc_target) 
+    setup_icc_profiles(icc_source, icc_target)
 
     # Run setup and start commands
     setup_command = [
@@ -853,7 +953,7 @@ if __name__ == "__main__":
     # Log output handling
     startup_log_path = "/opt/corpus/censhare/censhare-Service-Client/logs/startup.log"
     service_log_path = "/opt/corpus/censhare/censhare-Service-Client/logs/service-client-internal-0.0.log"
-    with open(startup_log_path, "r") as file:
+    with open(startup_log_path) as file:
         print(file.read())
     if wait_for_log_file(service_log_path):
         # Log output handling
