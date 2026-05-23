@@ -212,6 +212,22 @@ Delegates (built-in): bzlib cairo djvu fftw fontconfig fpx freetype gvc heic jbi
 
 You can adjust the behavior in `entrypoint.py` and the Dockerfile to fit your needs. The entrypoint handles environment variables for flexible runtime configuration.
 
+## Development
+
+Linting and formatting are managed with [pre-commit](https://pre-commit.com/) so local checks and CI use the exact same hooks and versions: [ruff](https://docs.astral.sh/ruff/) (Python lint + format), [hadolint](https://github.com/hadolint/hadolint) (Dockerfile), [shellcheck](https://www.shellcheck.net/), [yamllint](https://yamllint.readthedocs.io/), and a set of general file-hygiene hooks.
+
+```bash
+pip install pre-commit
+pre-commit install --install-hooks   # run hooks automatically on commit
+pre-commit run --all-files           # check the whole repo on demand
+```
+
+The `hadolint` hook runs in a container. Without a local Docker daemon, skip it:
+
+```bash
+SKIP=hadolint-docker pre-commit run --all-files
+```
+
 ## Support
 
 Voluntary support helps fund ongoing freelance maintenance of this repository. Support payments are appreciated but do not automatically create an entitlement to support, feature delivery, consulting, SLA, or invoice-based engagement.
