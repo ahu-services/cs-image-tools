@@ -1,0 +1,8 @@
+target-version = "py311"
+line-length = 88
+
+[lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
+# Line length is enforced by the formatter for code; long URLs and strings
+# (e.g. download links) are left intact rather than flagged.
+ignore = ["E501"]

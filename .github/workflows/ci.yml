@@ -13,22 +13,19 @@ permissions:
 
 jobs:
   lint:
-    name: Dockerfile and shell lint
+    name: Lint (pre-commit)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Hadolint (Dockerfile)
-        uses: hadolint/hadolint-action@v3.1.0
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          dockerfile: Dockerfile
-          failure-threshold: error
+          python-version: '3.x'
 
-      - name: ShellCheck (repository shell files)
-        uses: ludeeus/action-shellcheck@2.0.0
-        with:
-          scandir: .
+      - name: Run pre-commit hooks
+        uses: pre-commit/action@v3.0.1
 
   build-and-test-amd64:
     name: Build and test (amd64)
