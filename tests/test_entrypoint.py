@@ -1,9 +1,8 @@
 import hashlib
 import importlib.util
 import sys
-from pathlib import Path
 import xml.etree.ElementTree as ET
-
+from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ENTRYPOINT_PATH = REPO_ROOT / "entrypoint.py"
@@ -16,7 +15,9 @@ spec.loader.exec_module(entrypoint)
 
 def test_determine_serviceclient_version(tmp_path):
     script = tmp_path / "serviceclient.sh"
-    script.write_text('JAVA_PROPERTIES="$JAVA_PROPERTIES -Dcenshare.serviceclient.version=2024.2.0"\n')
+    script.write_text(
+        'JAVA_PROPERTIES="$JAVA_PROPERTIES -Dcenshare.serviceclient.version=2024.2.0"\n'
+    )
 
     detected = entrypoint._determine_serviceclient_version(str(script))
 
@@ -33,7 +34,9 @@ def test_download_unpack_logs_checksums(monkeypatch, tmp_path, capsys):
         def iter_content(self, chunk_size=8192):
             yield chunk
 
-    monkeypatch.setattr(entrypoint.requests, "get", lambda url, stream=True: DummyResponse())
+    monkeypatch.setattr(
+        entrypoint.requests, "get", lambda url, stream=True: DummyResponse()
+    )
 
     # Stub tarfile extraction to materialize a serviceclient script
     script_path = tmp_path / "serviceclient.sh"
@@ -50,7 +53,9 @@ def test_download_unpack_logs_checksums(monkeypatch, tmp_path, capsys):
 
     monkeypatch.setattr(entrypoint.tarfile, "open", lambda *args, **kwargs: DummyTar())
     monkeypatch.setattr(entrypoint.subprocess, "run", lambda *args, **kwargs: None)
-    monkeypatch.setattr(entrypoint, "_determine_serviceclient_version", lambda: "2024.2.0")
+    monkeypatch.setattr(
+        entrypoint, "_determine_serviceclient_version", lambda: "2024.2.0"
+    )
 
     archive_path = tmp_path / "download.tar.gz"
     entrypoint.download_unpack("https://example.com/archive.tar.gz", str(archive_path))
@@ -108,7 +113,10 @@ def test_configure_xml_sets_port_range_and_mapping(monkeypatch, tmp_path):
     assert connection.get("client-map-port-to") == ""
     assert connection.get("client-map-host-to") == ""
     assert connection.get("client-map-host-from") == ""
-    assert entrypoint.os.getenv("SERVICECLIENT_JAVA_OPTIONS") == "-Xmx512m -Djava.rmi.server.hostname=198.51.100.10"
+    assert (
+        entrypoint.os.getenv("SERVICECLIENT_JAVA_OPTIONS")
+        == "-Xmx512m -Djava.rmi.server.hostname=198.51.100.10"
+    )
 
 
 def test_configure_xml_defaults_to_constant_port(monkeypatch, tmp_path):
@@ -131,7 +139,10 @@ def test_configure_xml_defaults_to_constant_port(monkeypatch, tmp_path):
     assert connection.get("client-map-port-to") == ""
     assert connection.get("client-map-host-from") == ""
     assert connection.get("client-map-host-to") == ""
-    assert entrypoint.os.getenv("SERVICECLIENT_JAVA_OPTIONS") == "-Djava.rmi.server.hostname=10.0.0.9"
+    assert (
+        entrypoint.os.getenv("SERVICECLIENT_JAVA_OPTIONS")
+        == "-Djava.rmi.server.hostname=10.0.0.9"
+    )
 
 
 def test_configure_xml_respects_explicit_client_mapping(monkeypatch, tmp_path):
@@ -154,7 +165,10 @@ def test_configure_xml_respects_explicit_client_mapping(monkeypatch, tmp_path):
     assert connection.get("client-map-host-to") == "203.0.113.77"
     assert connection.get("client-map-port-from") == "32123"
     assert connection.get("client-map-port-to") == "32123"
-    assert entrypoint.os.getenv("SERVICECLIENT_JAVA_OPTIONS") == "-Djava.rmi.server.hostname=10.0.0.15"
+    assert (
+        entrypoint.os.getenv("SERVICECLIENT_JAVA_OPTIONS")
+        == "-Djava.rmi.server.hostname=10.0.0.15"
+    )
 
 
 def _write_minimal_policy(policy_path: Path):
@@ -181,7 +195,9 @@ def test_detect_container_memory_limit_bytes_prefers_finite_values(monkeypatch):
     assert entrypoint.detect_container_memory_limit_bytes() == 6 * entrypoint.GIB
 
 
-def test_configure_imagemagick_policy_autoconfigures_from_memory_limit(monkeypatch, tmp_path):
+def test_configure_imagemagick_policy_autoconfigures_from_memory_limit(
+    monkeypatch, tmp_path
+):
     policy_path = tmp_path / "policy.xml"
     _write_minimal_policy(policy_path)
     monkeypatch.setenv("IMAGEMAGICK_POLICY_AUTOCONFIG", "true")
@@ -190,7 +206,9 @@ def test_configure_imagemagick_policy_autoconfigures_from_memory_limit(monkeypat
     monkeypatch.delenv("IMAGEMAGICK_POLICY_MAP", raising=False)
     monkeypatch.delenv("IMAGEMAGICK_POLICY_THREAD", raising=False)
     monkeypatch.delenv("IMAGEMAGICK_POLICY_MAX_MEMORY_REQUEST", raising=False)
-    monkeypatch.setattr(entrypoint, "detect_container_memory_limit_bytes", lambda: 6 * entrypoint.GIB)
+    monkeypatch.setattr(
+        entrypoint, "detect_container_memory_limit_bytes", lambda: 6 * entrypoint.GIB
+    )
 
     entrypoint.configure_imagemagick_policy(str(policy_path))
 
@@ -198,19 +216,38 @@ def test_configure_imagemagick_policy_autoconfigures_from_memory_limit(monkeypat
     tree = ET.parse(policy_path)
     root = tree.getroot()
 
-    assert root.find("./policy[@domain='resource'][@name='thread']").get("value") == expected["thread"]
-    assert root.find("./policy[@domain='resource'][@name='memory']").get("value") == expected["memory"]
-    assert root.find("./policy[@domain='resource'][@name='map']").get("value") == expected["map"]
-    assert root.find("./policy[@domain='resource'][@name='disk']").get("value") == expected["disk"]
-    assert root.find("./policy[@domain='system'][@name='max-memory-request']").get("value") == expected["max-memory-request"]
+    assert (
+        root.find("./policy[@domain='resource'][@name='thread']").get("value")
+        == expected["thread"]
+    )
+    assert (
+        root.find("./policy[@domain='resource'][@name='memory']").get("value")
+        == expected["memory"]
+    )
+    assert (
+        root.find("./policy[@domain='resource'][@name='map']").get("value")
+        == expected["map"]
+    )
+    assert (
+        root.find("./policy[@domain='resource'][@name='disk']").get("value")
+        == expected["disk"]
+    )
+    assert (
+        root.find("./policy[@domain='system'][@name='max-memory-request']").get("value")
+        == expected["max-memory-request"]
+    )
 
 
-def test_configure_imagemagick_policy_keeps_bundled_defaults_by_default(monkeypatch, tmp_path):
+def test_configure_imagemagick_policy_keeps_bundled_defaults_by_default(
+    monkeypatch, tmp_path
+):
     policy_path = tmp_path / "policy.xml"
     _write_minimal_policy(policy_path)
     monkeypatch.delenv("IMAGEMAGICK_POLICY_AUTOCONFIG", raising=False)
     monkeypatch.setenv("SVC_INSTANCES", "4")
-    monkeypatch.setattr(entrypoint, "detect_container_memory_limit_bytes", lambda: 6 * entrypoint.GIB)
+    monkeypatch.setattr(
+        entrypoint, "detect_container_memory_limit_bytes", lambda: 6 * entrypoint.GIB
+    )
 
     entrypoint.configure_imagemagick_policy(str(policy_path))
 
@@ -218,10 +255,17 @@ def test_configure_imagemagick_policy_keeps_bundled_defaults_by_default(monkeypa
     root = tree.getroot()
 
     assert root.find("./policy[@domain='resource'][@name='thread']").get("value") == "2"
-    assert root.find("./policy[@domain='resource'][@name='memory']").get("value") == "2GiB"
+    assert (
+        root.find("./policy[@domain='resource'][@name='memory']").get("value") == "2GiB"
+    )
     assert root.find("./policy[@domain='resource'][@name='map']").get("value") == "4GiB"
-    assert root.find("./policy[@domain='resource'][@name='disk']").get("value") == "10GiB"
-    assert root.find("./policy[@domain='system'][@name='max-memory-request']").get("value") == "1GiB"
+    assert (
+        root.find("./policy[@domain='resource'][@name='disk']").get("value") == "10GiB"
+    )
+    assert (
+        root.find("./policy[@domain='system'][@name='max-memory-request']").get("value")
+        == "1GiB"
+    )
 
 
 def test_configure_imagemagick_policy_allows_explicit_overrides(monkeypatch, tmp_path):
@@ -239,23 +283,46 @@ def test_configure_imagemagick_policy_allows_explicit_overrides(monkeypatch, tmp
     root = tree.getroot()
 
     assert root.find("./policy[@domain='resource'][@name='thread']").get("value") == "2"
-    assert root.find("./policy[@domain='resource'][@name='memory']").get("value") == "768MiB"
-    assert root.find("./policy[@domain='resource'][@name='map']").get("value") == "1536MiB"
-    assert root.find("./policy[@domain='system'][@name='max-memory-request']").get("value") == "384MiB"
+    assert (
+        root.find("./policy[@domain='resource'][@name='memory']").get("value")
+        == "768MiB"
+    )
+    assert (
+        root.find("./policy[@domain='resource'][@name='map']").get("value") == "1536MiB"
+    )
+    assert (
+        root.find("./policy[@domain='system'][@name='max-memory-request']").get("value")
+        == "384MiB"
+    )
 
 
 def _facility_xml(key, enabled="false", path_key=None, path_value=None):
     facility = ET.Element("facility", {"key": key, "enabled": enabled})
     if path_key and path_value:
-        ET.SubElement(facility, "path", {"key": path_key, "label": key, "path": path_value})
+        ET.SubElement(
+            facility, "path", {"key": path_key, "label": key, "path": path_value}
+        )
     return facility
 
 
 def test_update_facility_paths_sets_wkhtmltoimage_path_and_enables(monkeypatch):
-    facility = _facility_xml("wkhtmltoimage", enabled="false", path_key="@@HTML2IMG@@", path_value="/usr/bin/wkhtmltoimage")
+    facility = _facility_xml(
+        "wkhtmltoimage",
+        enabled="false",
+        path_key="@@HTML2IMG@@",
+        path_value="/usr/bin/wkhtmltoimage",
+    )
 
-    monkeypatch.setattr(entrypoint.os.path, "exists", lambda path: path == "/usr/local/bin/wkhtmltoimage")
-    monkeypatch.setattr(entrypoint.os, "access", lambda path, mode: path == "/usr/local/bin/wkhtmltoimage")
+    monkeypatch.setattr(
+        entrypoint.os.path,
+        "exists",
+        lambda path: path == "/usr/local/bin/wkhtmltoimage",
+    )
+    monkeypatch.setattr(
+        entrypoint.os,
+        "access",
+        lambda path, mode: path == "/usr/local/bin/wkhtmltoimage",
+    )
 
     entrypoint.update_facility_paths(facility, "wkhtmltoimage", office_url="")
 
@@ -266,10 +333,19 @@ def test_update_facility_paths_sets_wkhtmltoimage_path_and_enables(monkeypatch):
 
 
 def test_update_facility_paths_enables_ffmpeg_when_present(monkeypatch):
-    facility = _facility_xml("ffmpeg", enabled="false", path_key="@@FFMPEG-PATH@@", path_value="/usr/local/bin/ffmpeg")
+    facility = _facility_xml(
+        "ffmpeg",
+        enabled="false",
+        path_key="@@FFMPEG-PATH@@",
+        path_value="/usr/local/bin/ffmpeg",
+    )
 
-    monkeypatch.setattr(entrypoint.os.path, "exists", lambda path: path == "/usr/local/bin/ffmpeg")
-    monkeypatch.setattr(entrypoint.os, "access", lambda path, mode: path == "/usr/local/bin/ffmpeg")
+    monkeypatch.setattr(
+        entrypoint.os.path, "exists", lambda path: path == "/usr/local/bin/ffmpeg"
+    )
+    monkeypatch.setattr(
+        entrypoint.os, "access", lambda path, mode: path == "/usr/local/bin/ffmpeg"
+    )
 
     entrypoint.update_facility_paths(facility, "ffmpeg", office_url="")
 
