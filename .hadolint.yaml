@@ -1,0 +1,3 @@
+# Match the previous CI behavior: only fail on error-level findings, not the
+# many warning/info-level Dockerfile style suggestions.
+failure-threshold: error
