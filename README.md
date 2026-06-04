@@ -229,6 +229,13 @@ The `hadolint` hook runs in a container. Without a local Docker daemon, skip it:
 SKIP=hadolint-docker pre-commit run --all-files
 ```
 
+## Governance
+
+- Contribution guide: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Security policy: [SECURITY.md](SECURITY.md)
+- AI-agent guide: [AGENTS.md](AGENTS.md)
+- License: [LICENSE](LICENSE)
+
 ## Support
 
 If this Docker image is useful to you, you can [support its ongoing maintenance via bunq](https://bunq.me/ahuservices?description=cs-image-tools-maintenance-support). Support is voluntary and appreciated, but does not create any entitlement to support, features, consulting, an SLA, or invoice-based work.
