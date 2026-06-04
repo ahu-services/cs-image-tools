@@ -35,7 +35,7 @@ def test_download_unpack_logs_checksums(monkeypatch, tmp_path, capsys):
             yield chunk
 
     monkeypatch.setattr(
-        entrypoint.requests, "get", lambda url, stream=True: DummyResponse()
+        entrypoint.requests, "get", lambda url, **kwargs: DummyResponse()
     )
 
     # Stub tarfile extraction to materialize a serviceclient script
@@ -143,6 +143,38 @@ def test_configure_xml_defaults_to_constant_port(monkeypatch, tmp_path):
         entrypoint.os.getenv("SERVICECLIENT_JAVA_OPTIONS")
         == "-Djava.rmi.server.hostname=10.0.0.9"
     )
+
+
+def test_configure_xml_updates_existing_port_range_connection(monkeypatch, tmp_path):
+    # A pre-existing, attribute-only <connection type="port-range"/> is falsy as an
+    # ElementTree element; ensure it is still located via an explicit None check and
+    # not silently skipped in favour of a missing "standard" connection.
+    prefs_dir = tmp_path / "config" / ".hosts" / "host4"
+    prefs_dir.mkdir(parents=True, exist_ok=True)
+    prefs_path = prefs_dir / "serviceclient-preferences-user4.xml"
+    prefs_path.write_text(
+        """<root>
+  <connection type="port-range" server-port-range-from="1" server-port-range-to="1"/>
+  <facilities instances="1">
+    <facility key="imagemagick"/>
+  </facilities>
+</root>
+"""
+    )
+    (tmp_path / "config" / "hosts.xml").write_text("<root/>")
+
+    monkeypatch.setenv("SERVICECLIENT_RMI_PORT", "40000")
+    monkeypatch.delenv("SERVICECLIENT_RMI_PORT_TO", raising=False)
+    monkeypatch.delenv("SERVICECLIENT_CALLBACK_HOST", raising=False)
+    monkeypatch.delenv("SERVICECLIENT_JAVA_OPTIONS", raising=False)
+    monkeypatch.setattr(entrypoint, "detect_rmi_host_ip", lambda: "10.0.0.20")
+
+    entrypoint.configure_xml("host4", "user4", base_dir=str(tmp_path))
+
+    connection = ET.parse(prefs_path).getroot().find(".//connection")
+    assert connection.get("type") == "port-range"
+    assert connection.get("server-port-range-from") == "40000"
+    assert connection.get("server-port-range-to") == "40000"
 
 
 def test_configure_xml_respects_explicit_client_mapping(monkeypatch, tmp_path):

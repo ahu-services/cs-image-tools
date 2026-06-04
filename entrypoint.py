@@ -54,9 +54,11 @@ def str_to_bool(value):
     Convert a string to a boolean.
     Returns True for 'true', '1', 't', 'y', 'yes' (case insensitive).
     Returns False for 'false', '0', 'f', 'n', 'no' (case insensitive).
-    Defaults to False for any other value.
+    Defaults to False for any other value (including None).
     """
-    return value.lower() in ["true", "1", "t", "y", "yes"]
+    if not value:
+        return False
+    return value.strip().lower() in {"true", "1", "t", "y", "yes"}
 
 
 def _read_first_line(path):
@@ -297,40 +299,43 @@ def download_unpack(url, output_path):
     Raises:
     SystemExit: If the download fails or the HTTP status is not 200.
     """
-    response = requests.get(url, stream=True)
-    if response.status_code == 200:
-        hashers = {
-            "md5": hashlib.md5(),
-            "sha256": hashlib.sha256(),
-        }
-        with open(output_path, "wb") as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
-                for hasher in hashers.values():
-                    hasher.update(chunk)
-        print("Download complete.")
-        print("Archive checksums:")
-        for name, hasher in hashers.items():
-            print(f"  {name.upper()}: {hasher.hexdigest()}")
-        print("Unpacking...")
-        with tarfile.open(output_path) as tar:
-            try:
-                tar.extractall(path="/opt/corpus/", filter="data")
-            except TypeError:
-                # Fallback for older Python versions without the filter argument.
-                tar.extractall(path="/opt/corpus/")
-        print("Unpacking complete.")
-        subprocess.run(["chown", "-R", "corpus:corpus", "/opt/corpus/"], check=True)
-        detected_version = _determine_serviceclient_version()
-        if detected_version:
-            print(f"Installed service client version: {detected_version}")
-        else:
-            print(
-                "Warning: Could not determine installed service client version from serviceclient.sh."
-            )
-    else:
-        print("Failed to download the file.")
+    # (connect timeout, read timeout) so a stalled connection fails fast instead
+    # of hanging the container start indefinitely.
+    response = requests.get(url, stream=True, timeout=(10, 60))
+    if response.status_code != 200:
+        print(f"Failed to download the file (HTTP {response.status_code}).")
         sys.exit(1)
+
+    hashers = {
+        # usedforsecurity=False: MD5 here is only an integrity/identity checksum.
+        "md5": hashlib.md5(usedforsecurity=False),
+        "sha256": hashlib.sha256(),
+    }
+    with open(output_path, "wb") as f:
+        for chunk in response.iter_content(chunk_size=8192):
+            f.write(chunk)
+            for hasher in hashers.values():
+                hasher.update(chunk)
+    print("Download complete.")
+    print("Archive checksums:")
+    for name, hasher in hashers.items():
+        print(f"  {name.upper()}: {hasher.hexdigest()}")
+    print("Unpacking...")
+    with tarfile.open(output_path) as tar:
+        try:
+            tar.extractall(path="/opt/corpus/", filter="data")
+        except TypeError:
+            # Fallback for older Python versions without the filter argument.
+            tar.extractall(path="/opt/corpus/")
+    print("Unpacking complete.")
+    subprocess.run(["chown", "-R", "corpus:corpus", "/opt/corpus/"], check=True)
+    detected_version = _determine_serviceclient_version()
+    if detected_version:
+        print(f"Installed service client version: {detected_version}")
+    else:
+        print(
+            "Warning: Could not determine installed service client version from serviceclient.sh."
+        )
 
 
 def select_jdk_major(client_version):
@@ -520,10 +525,12 @@ def configure_xml(
     tree = ET.parse(path)
     root = tree.getroot()
 
-    # Update connection settings (force port-range to keep listeners in a fixed window)
-    connection = root.find('.//connection[@type="port-range"]') or root.find(
-        './/connection[@type="standard"]'
-    )
+    # Update connection settings (force port-range to keep listeners in a fixed window).
+    # Use explicit "is not None" checks: attribute-only Elements are falsy, so an
+    # "x or y" fallback would silently skip a present-but-childless <connection>.
+    connection = root.find('.//connection[@type="port-range"]')
+    if connection is None:
+        connection = root.find('.//connection[@type="standard"]')
     if connection is not None:
         connection.set("type", "port-range")
         connection.set("client-map-host-from", client_map_host_from)
@@ -537,19 +544,19 @@ def configure_xml(
 
     # Update facilities instances
     facilities = root.find(".//facilities")
-    facilities.attrib["instances"] = svc_instances
+    if facilities is None:
+        print("Warning: No <facilities> element found in serviceclient preferences.")
+    else:
+        facilities.attrib["instances"] = svc_instances
 
-    # Optional: Override timeouts via environment variables
-    for facility in facilities.findall(".//facility"):
-        key = facility.attrib["key"]
-        timeout_env_var = os.getenv(f"{key.upper()}_TIMEOUT")
-        if timeout_env_var:
-            facility.set("timeout", timeout_env_var)
-
-    # Update paths and other settings for each facility
-    for facility in facilities.findall(".//facility"):
-        key = facility.attrib["key"]
-        update_facility_paths(facility, key, office_url)
+        # Apply optional per-facility timeout overrides and resolve tool paths in
+        # a single pass over the facilities.
+        for facility in facilities.findall(".//facility"):
+            key = facility.attrib["key"]
+            timeout_env_var = os.getenv(f"{key.upper()}_TIMEOUT")
+            if timeout_env_var:
+                facility.set("timeout", timeout_env_var)
+            update_facility_paths(facility, key, office_url)
 
     update_volumes_configuration(f"{base_dir}/config/hosts.xml")
 
@@ -557,20 +564,24 @@ def configure_xml(
     print("XML configuration updated.")
 
 
+# Maps each facility key to its placeholder/binary path pairs in the preferences XML.
+FACILITY_PATH_MAP = {
+    "imagemagick": (
+        "@@CONVERT@@",
+        "/usr/local/bin/magick",
+        "@@COMPOSITE@@",
+        "/usr/local/bin/composite",
+    ),
+    "exiftool": ("@@EXIFTOOL@@", "/usr/local/bin/exiftool"),
+    "ghostscript": ("@@GS@@", "/usr/local/bin/gs"),
+    "wkhtmltoimage": ("@@HTML2IMG@@", "/usr/local/bin/wkhtmltoimage"),
+    "pngquant": ("@@PNGQUANT@@", "/usr/local/bin/pngquant"),
+    "ffmpeg": ("@@FFMPEG-PATH@@", "/usr/local/bin/ffmpeg"),
+}
+
+
 def get_path_map():
-    return {
-        "imagemagick": (
-            "@@CONVERT@@",
-            "/usr/local/bin/magick",
-            "@@COMPOSITE@@",
-            "/usr/local/bin/composite",
-        ),
-        "exiftool": ("@@EXIFTOOL@@", "/usr/local/bin/exiftool"),
-        "ghostscript": ("@@GS@@", "/usr/local/bin/gs"),
-        "wkhtmltoimage": ("@@HTML2IMG@@", "/usr/local/bin/wkhtmltoimage"),
-        "pngquant": ("@@PNGQUANT@@", "/usr/local/bin/pngquant"),
-        "ffmpeg": ("@@FFMPEG-PATH@@", "/usr/local/bin/ffmpeg"),
-    }
+    return FACILITY_PATH_MAP
 
 
 def update_facility_paths(facility, key, office_url):
@@ -582,11 +593,9 @@ def update_facility_paths(facility, key, office_url):
     facility (ET.Element): XML element that contains facility configuration.
     key (str): Facility key to determine which paths to update.
     """
-    path_map = get_path_map()
-
     # Update paths based on facility key
-    if key in path_map:
-        paths = path_map[key]
+    if key in FACILITY_PATH_MAP:
+        paths = FACILITY_PATH_MAP[key]
         target_paths = []
         for i in range(0, len(paths), 2):
             path_element = facility.find(f".//path[@key='{paths[i]}']")
