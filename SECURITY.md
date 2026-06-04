@@ -6,7 +6,7 @@ The `main` branch is the only actively supported line at the moment.
 ## Reporting a Vulnerability
 Please do not open public issues for security vulnerabilities.
 
-Report privately to the maintainer and include:
+Report privately by email to security@ahu.services and include:
 - affected component (Dockerfile, entrypoint, bundled tool)
 - impact and attack scenario
 - reproduction steps
