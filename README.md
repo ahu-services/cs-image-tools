@@ -2,11 +2,12 @@
 
 > Production hardening and rendering experiments for censhare image tooling in containerized Service-Client workflows.
 
+[![CI](https://github.com/ahu-services/cs-image-tools/actions/workflows/ci.yml/badge.svg)](https://github.com/ahu-services/cs-image-tools/actions/workflows/ci.yml)
 [![Docker](https://img.shields.io/badge/Container-Docker-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/)
 [![Java](https://img.shields.io/badge/Java-11%2F17%2F21-007396?logo=openjdk&logoColor=white)](https://openjdk.org/)
 [![License](https://img.shields.io/github/license/ahu-services/cs-image-tools)](LICENSE)
 
-[![Support via bunq](https://img.shields.io/badge/Support-bunq-00A1E0?style=flat-square&logo=bunq&logoColor=white)](https://bunq.me/ahu)
+[![Support via bunq](https://img.shields.io/badge/Support-bunq-00A1E0?style=flat-square&logo=bunq&logoColor=white)](https://bunq.me/ahuservices?description=cs-image-tools-maintenance-support)
 
 This repository provides a Docker image and entrypoint to run the censhare-Service-Client with a consistent, containerized setup. It supports dynamic configuration at runtime or pre-configuration during image build.
 
@@ -228,9 +229,16 @@ The `hadolint` hook runs in a container. Without a local Docker daemon, skip it:
 SKIP=hadolint-docker pre-commit run --all-files
 ```
 
+## Governance
+
+- Contribution guide: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Security policy: [SECURITY.md](SECURITY.md)
+- AI-agent guide: [AGENTS.md](AGENTS.md)
+- License: [LICENSE](LICENSE)
+
 ## Support
 
-Voluntary support helps fund ongoing freelance maintenance of this repository. Support payments are appreciated but do not automatically create an entitlement to support, feature delivery, consulting, SLA, or invoice-based engagement.
+If this Docker image is useful to you, you can [support its ongoing maintenance via bunq](https://bunq.me/ahuservices?description=cs-image-tools-maintenance-support). Support is voluntary and appreciated, but does not create any entitlement to support, features, consulting, an SLA, or invoice-based work.
 
 ## License
 
