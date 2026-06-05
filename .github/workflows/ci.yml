@@ -51,7 +51,7 @@ jobs:
       - name: Unit tests with coverage
         env:
           PYTHONPATH: ${{ github.workspace }}
-        run: pytest tests/test_health_check.py tests/test_entrypoint.py --cov=. --cov-report=xml
+        run: pytest tests/test_health_check.py tests/test_entrypoint.py tests/test_entrypoint_units.py --cov=. --cov-report=xml
 
       - name: SonarQube Scan
         if: ${{ env.SONAR_TOKEN != '' }}
