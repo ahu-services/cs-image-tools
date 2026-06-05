@@ -3,6 +3,8 @@
 > Production hardening and rendering experiments for censhare image tooling in containerized Service-Client workflows.
 
 [![CI](https://github.com/ahu-services/cs-image-tools/actions/workflows/ci.yml/badge.svg)](https://github.com/ahu-services/cs-image-tools/actions/workflows/ci.yml)
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=ahu-services_cs-image-tools&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=ahu-services_cs-image-tools)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=ahu-services_cs-image-tools&metric=coverage)](https://sonarcloud.io/summary/new_code?id=ahu-services_cs-image-tools)
 [![Docker](https://img.shields.io/badge/Container-Docker-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/)
 [![Java](https://img.shields.io/badge/Java-11%2F17%2F21-007396?logo=openjdk&logoColor=white)](https://openjdk.org/)
 [![License](https://img.shields.io/github/license/ahu-services/cs-image-tools)](LICENSE)
