@@ -46,9 +46,11 @@ jobs:
           python-version: '3.11'
 
       - name: Install test dependencies
-        run: pip install pytest pytest-cov
+        run: pip install pytest pytest-cov requests
 
       - name: Unit tests with coverage
+        env:
+          PYTHONPATH: ${{ github.workspace }}
         run: pytest tests/test_health_check.py tests/test_entrypoint.py --cov=. --cov-report=xml
 
       - name: SonarQube Scan
