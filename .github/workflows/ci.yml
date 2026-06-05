@@ -27,6 +27,36 @@ jobs:
       - name: Run pre-commit hooks
         uses: pre-commit/action@v3.0.1
 
+  sonarqube:
+    name: SonarQube
+    runs-on: ubuntu-latest
+    needs: lint
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install test dependencies
+        run: pip install pytest pytest-cov requests
+
+      - name: Unit tests with coverage
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: pytest tests/test_health_check.py tests/test_entrypoint.py --cov=. --cov-report=xml
+
+      - name: SonarQube Scan
+        if: ${{ env.SONAR_TOKEN != '' }}
+        uses: SonarSource/sonarqube-scan-action@v8.1.0
+
   build-and-test-amd64:
     name: Build and test (amd64)
     runs-on: ubuntu-latest
