@@ -1,0 +1,12 @@
+[run]
+# Measure branch coverage in addition to statement coverage.
+branch = True
+
+[report]
+# Exclude code that is intentionally not unit-tested. coverage.py drops the
+# whole guarded block when its opening line matches, so the __main__ entrypoint
+# (thin orchestration over already-tested functions) is not counted.
+exclude_also =
+    if __name__ == .__main__.:
+    if TYPE_CHECKING:
+    raise NotImplementedError
