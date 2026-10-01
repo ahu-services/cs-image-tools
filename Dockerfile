@@ -1,8 +1,8 @@
 # TODO build gslib
 # TODO build dmr https://github.com/ImageMagick/MagickCache
 
-### Create base image for others (Debian 13.3)
-FROM debian:13.3-slim AS debian-builder
+### Create base image for others (Debian 13.7)
+FROM debian:13.7-slim AS debian-builder
 
 RUN apt-get update && apt-get install -y wget build-essential libtool pkg-config \
     libfreetype-dev libfontconfig-dev libbz2-dev libzip-dev libzstd-dev \
@@ -16,7 +16,7 @@ RUN apt-get install ca-certificates
 
 ### Build Ghostscript
 FROM debian-builder AS ghostscript-builder
-ARG GHOSTSCRIPT_VERSION=10.07.1
+ARG GHOSTSCRIPT_VERSION=10.08.0
 
 # Download and build Ghostscript
 WORKDIR /tmp
@@ -48,7 +48,7 @@ RUN apt-get update && apt-get install -y cmake ninja-build clang libjpeg-dev \
 
 ### Build ImageMagick
 FROM debian-builder AS im-builder
-ARG IMAGEMAGICK_VERSION=7.1.2-24
+ARG IMAGEMAGICK_VERSION=7.1.2-32
 
 # Download ImageMagick
 WORKDIR /tmp
@@ -79,7 +79,7 @@ COPY imagemagick-policy.xml /IM-build/usr/local/etc/ImageMagick-7/policy.xml
 
 ### Build ffmpeg
 FROM debian-builder AS ffmpeg-builder
-ARG FFMPEG_VERSION=8.1.1
+ARG FFMPEG_VERSION=9.0.2
 
 # Download and build ffmpeg
 WORKDIR /tmp
@@ -179,7 +179,7 @@ COPY --from=ffmpeg-builder /ffmpeg-build/ /TOOLS/
 COPY --from=pngquant-builder /pngquant-build/ /TOOLS/
 
 ### Final image
-FROM debian:13.3-slim AS final
+FROM debian:13.7-slim AS final
 
 RUN set -eux; \
     apt-get update; \
@@ -220,7 +220,7 @@ RUN ldconfig; \
     useradd -d /opt/corpus -u 861 -g 861 -m  corpus; \
     apt-get update; \
     apt-get install -y --no-install-recommends python3-pip; \
-    pip3 install --no-cache-dir --break-system-packages "requests==2.32.3" "urllib3==2.6.0"; \
+    pip3 install --no-cache-dir --break-system-packages "requests==2.34.2" "urllib3==2.8.0"; \
     apt-get purge -y python3-pip; \
     apt-get autoremove -y; \
     if ls /amazon-corretto-*-linux-jdk.deb >/dev/null 2>&1; then \
