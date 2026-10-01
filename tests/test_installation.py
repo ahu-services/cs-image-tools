@@ -31,7 +31,7 @@ def test_user_corpus_can_execute_commands():
 
 def test_ghostscript_installed_and_version():
     """Test that Ghostscript is installed, executable, and the version is correct."""
-    expected_version = "10.07.1"
+    expected_version = "10.08.0"
     try:
         # Check if 'gs' command is available and get version
         result = subprocess.run(
@@ -62,7 +62,7 @@ def test_ghostscript_installed_and_version():
 
 def test_imagemagick_installed_and_version():
     """Test that ImageMagick is installed, executable, and the version is correct."""
-    expected_version = "7.1.2-24"
+    expected_version = "7.1.2-32"
     expected_features = "Features: Cipher DPC HDRI Modules OpenMP(4.5)"
     expected_delegagtes = "Delegates (built-in): bzlib cairo djvu fftw fontconfig fpx freetype gvc heic jbig jng jp2 jpeg jxl lcms ltdl lzma openexr pangocairo png raqm raw rsvg tiff uhdr webp wmf xml zip zlib zstd"
 
@@ -147,7 +147,7 @@ def test_exiftool_installed_and_version():
 
 def test_ffmpeg_installed_and_version():
     """Test that ffmpeg is installed, executable, and the version is correct."""
-    expected_version = "8.1.1"
+    expected_version = "9.0.2"
     try:
         # Check if 'ffmpeg' command is available and get version
         result = subprocess.run(
