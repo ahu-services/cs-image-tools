@@ -107,6 +107,121 @@ def test_imagemagick_installed_and_version():
         pytest.fail("'magick' command not found for user 'corpus'.")
 
 
+MAGICK = "/usr/local/bin/magick"
+SVG_NS = 'xmlns="http://www.w3.org/2000/svg"'
+RED_RECT_SVG = f'<svg {SVG_NS} width="40" height="20"><rect width="40" height="20" fill="#ff0000"/></svg>'
+
+
+RED = "255,0,0"
+WHITE = "255,255,255"
+
+
+def _render_svg_center_pixel(svg_path):
+    """Render an SVG onto white and return the center pixel as "r,g,b", or None if rendering failed."""
+    channel = "%[fx:int(255*p{{20,10}}.{}+0.5)]"
+    result = subprocess.run(
+        [
+            MAGICK,
+            str(svg_path),
+            "-background",
+            "#ffffff",
+            "-flatten",
+            "-format",
+            ",".join(channel.format(c) for c in "rgb"),
+            "info:",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def test_imagemagick_reads_svg(tmp_path):
+    """SVG assets must convert to a JPEG preview (censhare PreviewMaker command)."""
+    svg = tmp_path / "asset.svg"
+    svg.write_text(RED_RECT_SVG)
+    out = tmp_path / "preview.jpg"
+    result = subprocess.run(
+        [
+            MAGICK,
+            str(svg),
+            "-intent",
+            "Perceptual",
+            "-black-point-compensation",
+            "-auto-orient",
+            "-resize",
+            "1000x1000>",
+            "-quality",
+            "80",
+            "-density",
+            "72x72",
+            "-background",
+            "#ffffff",
+            "+repage",
+            "-flatten",
+            str(out),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, f"SVG preview failed: {result.stderr}"
+    assert out.stat().st_size > 0
+
+
+def test_imagemagick_blocks_msvg_and_mvg(tmp_path):
+    """ImageMagick's internal MSVG renderer and MVG input stay disabled."""
+    svg = tmp_path / "asset.svg"
+    svg.write_text(RED_RECT_SVG)
+    mvg = tmp_path / "asset.mvg"
+    mvg.write_text("viewbox 0 0 10 10 fill red rectangle 0,0 10,10\n")
+    for source in (f"msvg:{svg}", f"mvg:{mvg}"):
+        result = subprocess.run(
+            [MAGICK, source, str(tmp_path / "out.png")],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0, f"{source} must be rejected"
+        assert "not allowed by the security policy" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "reference",
+    [
+        '<image href="{href}" width="40" height="20"/>',
+        '<xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="{href}"/>',
+    ],
+    ids=["image", "xinclude"],
+)
+def test_svg_cannot_include_files_outside_its_directory(tmp_path, reference):
+    """librsvg only resolves references next to the SVG, not elsewhere on disk."""
+    svg_dir = tmp_path / "svg"
+    outside_dir = tmp_path / "outside"
+    svg_dir.mkdir()
+    outside_dir.mkdir()
+    for directory in (svg_dir, outside_dir):
+        subprocess.run(
+            [MAGICK, "-size", "40x20", "xc:#ff0000", str(directory / "red.png")],
+            check=True,
+        )
+        (directory / "red.xml").write_text(
+            f'<rect {SVG_NS} width="40" height="20" fill="#ff0000"/>'
+        )
+    target = "red.png" if reference.startswith("<image") else "red.xml"
+
+    def render(href):
+        svg = svg_dir / "asset.svg"
+        svg.write_text(
+            f'<svg {SVG_NS} width="40" height="20">{reference.format(href=href)}</svg>'
+        )
+        return _render_svg_center_pixel(svg)
+
+    # Control: a reference next to the SVG is resolved, so the checks below are meaningful.
+    assert render(target) == RED
+    # Blocked references either render nothing or make librsvg reject the file.
+    assert render(f"../outside/{target}") in (WHITE, None)
+    assert render(f"file://{outside_dir / target}") in (WHITE, None)
+
+
 def test_exiftool_installed_and_version():
     """Test that ExifTool is installed, executable, and the version is correct."""
     expected_version = "13.55"
