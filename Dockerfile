@@ -50,9 +50,10 @@ RUN apt-get update && apt-get install -y cmake ninja-build clang libjpeg-dev \
 FROM debian-builder AS im-builder
 ARG IMAGEMAGICK_VERSION=7.1.2-34
 
-# Download ImageMagick
+# Download ImageMagick (GitHub release tag; download.imagemagick.org is not reliably reachable)
 WORKDIR /tmp
-RUN wget https://download.imagemagick.org/archive/releases/ImageMagick-${IMAGEMAGICK_VERSION}.tar.gz
+RUN wget --tries=3 --timeout=60 -O ImageMagick-${IMAGEMAGICK_VERSION}.tar.gz \
+    https://github.com/ImageMagick/ImageMagick/archive/refs/tags/${IMAGEMAGICK_VERSION}.tar.gz
 
 COPY --from=ghostscript-builder /ghostscript-build/ /
 COPY --from=fpx-builder /fpx-build/ /
