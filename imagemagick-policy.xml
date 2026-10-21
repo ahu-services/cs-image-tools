@@ -87,19 +87,13 @@
   <policy domain="cache" name="synchronize" value="true"/>
   <!-- Replace passphrase for secure distributed processing -->
   <!-- <policy domain="cache" name="shared-secret" value="secret-passphrase" stealth="true"/> -->
-  <!-- Default: Block all delegates unless explicitly allowed -->
-  <policy domain="delegate" rights="none" pattern="*"/>
-  <!-- Allow required delegates explicitly -->
-  <policy domain="delegate" rights="read|execute" pattern="ffmpeg"/>
-  <policy domain="delegate" rights="read|execute" pattern="inkscape"/>
-  <policy domain="delegate" rights="read|execute" pattern="rsvg-convert"/>
-  <policy domain="delegate" rights="read|execute" pattern="gs"/>
-  <policy domain="delegate" rights="read|execute" pattern="tesseract"/>
-  <policy domain="delegate" rights="read|execute" pattern="dot"/>
-  <!-- Required for raster-to-vector conversions (e.g. output SVG via TRACE delegate). -->
-  <policy domain="delegate" rights="read|execute" pattern="potrace"/>
-  <policy domain="delegate" rights="read|execute" pattern="trace"/>
-  <policy domain="delegate" rights="read|execute" pattern="TRACE"/>
+  <!-- Delegates: no delegate policy. Since ImageMagick 7.1.2-32 every
+       argument of an external delegate command (temp paths, numbers, codec
+       names) is matched against the delegate policy, so a "deny *" plus
+       program-name allowlist blocks all delegates (rsvg-convert, potrace,
+       ffmpeg). Only the commands defined in delegates.xml can run; this
+       matches ImageMagick's own secure policy, where denying all delegates
+       is optional. -->
   <!-- Do not permit any image filters to load. -->
   <policy domain="filter" rights="none" pattern="*"/>
   <!-- Don't read/write from/to stdin/stdout. -->
