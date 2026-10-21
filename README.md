@@ -211,7 +211,10 @@ Delegates (built-in): bzlib cairo djvu fftw fontconfig fpx freetype gvc heic jbi
 
 ### ImageMagick security policy
 
-The bundled [`imagemagick-policy.xml`](imagemagick-policy.xml) is based on ImageMagick's `secure` policy with one deliberate deviation: **SVG input is allowed** so censhare can create previews for SVG assets. SVG is rendered by librsvg, which only resolves references next to the SVG file. ImageMagick's internal MSVG renderer and MVG/MSL input remain disabled. If a system must not process SVG, disallow the file type in censhare rather than in this image.
+The bundled [`imagemagick-policy.xml`](imagemagick-policy.xml) is based on ImageMagick's `secure` policy with these deliberate deviations:
+
+- **SVG input is allowed** so censhare can create previews for SVG assets. SVG is rendered by librsvg (`rsvg-convert`), which loads no network resources and only resolves files below the temporary directory ImageMagick renders from (`/tmp`). ImageMagick's internal MSVG renderer and MVG/MSL input remain disabled. If a system must not process SVG, disallow the file type in censhare rather than in this image.
+- **No delegate allowlist.** Since ImageMagick 7.1.2-32 every argument of a delegate command is checked against the delegate policy, so an allowlist of program names blocks all delegates. Only the commands defined in ImageMagick's `delegates.xml` can run (e.g. `rsvg-convert`, `potrace`, `ffmpeg`, `gs`).
 
 ## Customization
 

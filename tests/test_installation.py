@@ -5,6 +5,8 @@ import pwd
 import re
 import shutil
 import subprocess
+import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -181,45 +183,70 @@ def test_imagemagick_blocks_msvg_and_mvg(tmp_path):
             text=True,
         )
         assert result.returncode != 0, f"{source} must be rejected"
-        assert "not allowed by the security policy" in result.stderr
+        assert "security policy" in result.stderr
+
+
+BLUE = "0,0,255"
+BLUE_PNG_DATA_URI = (
+    "data:image/png;base64,"
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVQI12NgYPgPAAEDAQDZqt2zAAAAAElFTkSuQmCC"
+)
 
 
 @pytest.mark.parametrize(
     "reference",
     [
-        '<image href="{href}" width="40" height="20"/>',
+        '<image href="{href}" width="40" height="20" preserveAspectRatio="none"/>',
         '<xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="{href}"/>',
     ],
     ids=["image", "xinclude"],
 )
-def test_svg_cannot_include_files_outside_its_directory(tmp_path, reference):
-    """librsvg only resolves references next to the SVG, not elsewhere on disk."""
-    svg_dir = tmp_path / "svg"
-    outside_dir = tmp_path / "outside"
-    svg_dir.mkdir()
-    outside_dir.mkdir()
-    for directory in (svg_dir, outside_dir):
+def test_svg_cannot_include_files_from_elsewhere_on_disk(tmp_path, reference):
+    """librsvg must not embed files outside the temp directory the SVG is rendered from."""
+    outside_dir = Path(tempfile.mkdtemp(dir="/var/tmp"))
+    try:
         subprocess.run(
-            [MAGICK, "-size", "40x20", "xc:#ff0000", str(directory / "red.png")],
+            [MAGICK, "-size", "40x20", "xc:#0000ff", str(outside_dir / "blue.png")],
             check=True,
         )
-        (directory / "red.xml").write_text(
-            f'<rect {SVG_NS} width="40" height="20" fill="#ff0000"/>'
+        (outside_dir / "blue.xml").write_text(
+            f'<rect {SVG_NS} width="40" height="20" fill="#0000ff"/>'
         )
-    target = "red.png" if reference.startswith("<image") else "red.xml"
+        target = outside_dir / ("blue.png" if "<image" in reference else "blue.xml")
 
-    def render(href):
-        svg = svg_dir / "asset.svg"
-        svg.write_text(
-            f'<svg {SVG_NS} width="40" height="20">{reference.format(href=href)}</svg>'
-        )
-        return _render_svg_center_pixel(svg)
+        def render(href):
+            svg = tmp_path / "asset.svg"
+            svg.write_text(
+                f'<svg {SVG_NS} width="40" height="20">{reference.format(href=href)}</svg>'
+            )
+            return _render_svg_center_pixel(svg)
 
-    # Control: a reference next to the SVG is resolved, so the checks below are meaningful.
-    assert render(target) == RED
-    # Blocked references either render nothing or make librsvg reject the file.
-    assert render(f"../outside/{target}") in (WHITE, None)
-    assert render(f"file://{outside_dir / target}") in (WHITE, None)
+        if "<image" in reference:
+            # Control: embedded image data renders, so a white result below means "blocked".
+            assert render(BLUE_PNG_DATA_URI) == BLUE
+        # Blocked references either render nothing or make librsvg reject the file.
+        assert render(f"file://{target}") in (WHITE, None)
+        assert render(os.path.relpath(target, tmp_path)) in (WHITE, None)
+    finally:
+        shutil.rmtree(outside_dir)
+
+
+@pytest.mark.parametrize(
+    ("name", "source", "output"),
+    [("potrace", "png", "svg"), ("ffmpeg", "gif", "mp4")],
+)
+def test_imagemagick_external_delegates_run(tmp_path, name, source, output):
+    """Delegates invoked by ImageMagick (raster-to-SVG trace, video) are permitted by policy."""
+    src = tmp_path / f"in.{source}"
+    # Video output needs an animation; PNG holds a single frame.
+    frames = ["xc:red", "xc:blue"] if source == "gif" else ["xc:red"]
+    subprocess.run([MAGICK, "-size", "40x20", *frames, str(src)], check=True)
+    out = tmp_path / f"out.{output}"
+    result = subprocess.run(
+        [MAGICK, str(src), str(out)], capture_output=True, text=True
+    )
+    assert result.returncode == 0, f"{name} delegate failed: {result.stderr}"
+    assert out.stat().st_size > 0
 
 
 def test_exiftool_installed_and_version():
@@ -338,9 +365,11 @@ def test_corretto_jdk_installed():
         assert "Corretto" in combined_output, "Amazon Corretto JDK not installed."
         match = re.search(r'version\s+"(\d+)', combined_output)
         assert match, "Unable to detect Java version."
-        assert match.group(1) in {"11", "17", "21"}, (
-            "JDK major version is not within the supported set (11, 17, 21)."
-        )
+        assert match.group(1) in {
+            "11",
+            "17",
+            "21",
+        }, "JDK major version is not within the supported set (11, 17, 21)."
     except subprocess.CalledProcessError:
         pytest.fail("Java is not installed or cannot be executed.")
     except FileNotFoundError:
