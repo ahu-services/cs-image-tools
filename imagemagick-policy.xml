@@ -34,6 +34,11 @@
   undisclosed passphrase for remote connections. By adopting this robust
   policy, entities can elevate their overall security stance and alleviate
   potential vulnerabilities.
+
+  Local deviation for censhare: SVG input is permitted (see the coder rules
+  below), because SVG assets are uploaded by authenticated censhare users and
+  need previews. Sites that must not process SVG should disallow the file type
+  in censhare instead of in this image.
 -->
 <policymap>
   <!-- Set maximum parallel threads. -->
@@ -104,8 +109,12 @@
   <!-- Indirect reads are not permitted. -->
   <policy domain="path" rights="none" pattern="@*"/>
   <!-- These image types are security risks on read, but write is fine -->
-  <policy domain="coder" rights="write" pattern="SVG"/>
-  <policy domain="module" rights="write" pattern="{MSL,MVG,PS,SVG,URL,XPS}"/>
+  <policy domain="module" rights="write" pattern="{MSL,MVG,PS,URL,XPS}"/>
+  <!-- Read SVG via librsvg (censhare previews). Keep ImageMagick's internal
+       MSVG renderer disabled: it translates SVG into MVG and was the
+       ImageTragick (CVE-2016-3714) attack path. -->
+  <policy domain="coder" rights="read|write" pattern="SVG"/>
+  <policy domain="coder" rights="none" pattern="MSVG"/>
   <!-- This policy sets the number of times to replace content of certain
        memory buffers and temporary files before they are freed or deleted. -->
   <policy domain="system" name="shred" value="1"/>

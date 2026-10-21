@@ -209,6 +209,10 @@ Features: Cipher DPC HDRI Modules OpenMP(4.5)
 Delegates (built-in): bzlib cairo djvu fftw fontconfig fpx freetype gvc heic jbig jng jp2 jpeg jxl lcms ltdl lzma openexr pangocairo png raqm raw rsvg tiff uhdr webp wmf xml zip zlib zstd
 ```
 
+### ImageMagick security policy
+
+The bundled [`imagemagick-policy.xml`](imagemagick-policy.xml) is based on ImageMagick's `secure` policy with one deliberate deviation: **SVG input is allowed** so censhare can create previews for SVG assets. SVG is rendered by librsvg, which only resolves references next to the SVG file. ImageMagick's internal MSVG renderer and MVG/MSL input remain disabled. If a system must not process SVG, disallow the file type in censhare rather than in this image.
+
 ## Customization
 
 You can adjust the behavior in `entrypoint.py` and the Dockerfile to fit your needs. The entrypoint handles environment variables for flexible runtime configuration.
