@@ -64,7 +64,7 @@ def test_ghostscript_installed_and_version():
 
 def test_imagemagick_installed_and_version():
     """Test that ImageMagick is installed, executable, and the version is correct."""
-    expected_version = "7.1.2-32"
+    expected_version = "7.1.2-34"
     expected_features = "Features: Cipher DPC HDRI Modules OpenMP(4.5)"
     expected_delegagtes = "Delegates (built-in): bzlib cairo djvu fftw fontconfig fpx freetype gvc heic jbig jng jp2 jpeg jxl lcms ltdl lzma openexr pangocairo png raqm raw rsvg tiff uhdr webp wmf xml zip zlib zstd"
 

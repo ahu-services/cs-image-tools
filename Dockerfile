@@ -48,7 +48,7 @@ RUN apt-get update && apt-get install -y cmake ninja-build clang libjpeg-dev \
 
 ### Build ImageMagick
 FROM debian-builder AS im-builder
-ARG IMAGEMAGICK_VERSION=7.1.2-32
+ARG IMAGEMAGICK_VERSION=7.1.2-34
 
 # Download ImageMagick
 WORKDIR /tmp
