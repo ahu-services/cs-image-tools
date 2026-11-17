@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/ahu-services/cs-image-tools/actions/workflows/ci.yml/badge.svg)](https://github.com/ahu-services/cs-image-tools/actions/workflows/ci.yml)
 [![Docker](https://img.shields.io/badge/Container-Docker-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/)
-[![Java](https://img.shields.io/badge/Java-11%2F17%2F21-007396?logo=openjdk&logoColor=white)](https://openjdk.org/)
+[![Java](https://img.shields.io/badge/Java-11%2F17%2F21%2F25-007396?logo=openjdk&logoColor=white)](https://openjdk.org/)
 [![License](https://img.shields.io/github/license/ahu-services/cs-image-tools)](LICENSE)
 
 [![Support via bunq](https://img.shields.io/badge/Support-bunq-00A1E0?style=flat-square&logo=bunq&logoColor=white)](https://bunq.me/ahuservices?description=cs-image-tools-maintenance-support)
@@ -17,7 +17,7 @@ This repository provides a Docker image and entrypoint to run the censhare-Servi
 - Dynamic or pre-installed Service-Client (via `REPO_USER`, `REPO_PASS`, `VERSION`)
 - Flexible configuration via environment variables and JSON volume config
 - Graceful shutdown handling for data integrity
-- Automatic Java runtime selection (Corretto 11/17/21) matching Service-Client version
+- Automatic Java runtime selection (Corretto 11/17/21/25) matching Service-Client version
 
 ## Prerequisites
 
@@ -185,7 +185,8 @@ The image keeps the Service-Client and Java runtime in sync automatically:
 
 - `2019.2` — `2022.1` use Corretto 11
 - `2022.2` — `2024.3` use Corretto 17
-- `2025.1` and newer use Corretto 21
+- `2025.1` — `2025.x` use Corretto 21
+- `2026.1` and newer use Corretto 25
 
 Only the major release component (first two numbers of `VERSION`, e.g. `2025.3`) is used to pick the JDK.
 

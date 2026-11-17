@@ -369,7 +369,8 @@ def test_corretto_jdk_installed():
             "11",
             "17",
             "21",
-        }, "JDK major version is not within the supported set (11, 17, 21)."
+            "25",
+        }, "JDK major version is not within the supported set (11, 17, 21, 25)."
     except subprocess.CalledProcessError:
         pytest.fail("Java is not installed or cannot be executed.")
     except FileNotFoundError:
