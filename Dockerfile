@@ -154,8 +154,10 @@ RUN set -eux; \
             JDK_RESOLVED=11; \
         elif [ "$RELEASE_KEY" -le 202403 ]; then \
             JDK_RESOLVED=17; \
-        else \
+        elif [ "$RELEASE_KEY" -le 202599 ]; then \
             JDK_RESOLVED=21; \
+        else \
+            JDK_RESOLVED=25; \
         fi; \
         ARCH=$(uname -m); \
         case "$ARCH" in \

@@ -21,8 +21,9 @@ from urllib3.exceptions import HTTPError
 JAVA_WINDOWS = [
     (202201, 11),
     (202403, 17),
+    (202599, 21),
 ]
-JAVA_DEFAULT = 21
+JAVA_DEFAULT = 25
 
 CLIENT_VERSION_FILE = "/opt/corpus/censhare/client-version.txt"
 SERVICECLIENT_SCRIPT = "/opt/corpus/censhare/censhare-Service-Client/serviceclient.sh"

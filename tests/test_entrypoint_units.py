@@ -181,7 +181,10 @@ def test_configure_policy_warns_on_parse_error(tmp_path, capsys):
         ("abc.def", entrypoint.JAVA_DEFAULT),  # unparseable
         ("2022.1", 11),  # 202201 <= 202201
         ("2024.3", 17),  # 202403 <= 202403
-        ("2025.1", entrypoint.JAVA_DEFAULT),  # newer than all windows
+        ("2025.1", 21),  # 202501 <= 202599
+        ("2025.3", 21),  # all 2025.x releases need Java 21
+        ("2026.1", 25),  # censhare 2026.1 requires Java 25
+        ("2026.1", entrypoint.JAVA_DEFAULT),  # newer than all windows
     ],
 )
 def test_select_jdk_major(version, expected):
