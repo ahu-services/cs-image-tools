@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # TODO build gslib
 # TODO build dmr https://github.com/ImageMagick/MagickCache
 
@@ -120,24 +121,41 @@ RUN curl https://sh.rustup.rs -sSf | bash -s -- -y \
 ### Image to combine all tools
 FROM debian-builder AS image-tools-combined
 
-## Parameters for optional pre-download of censhare-Service-Client
-ARG REPO_USER
-ARG REPO_PASS
+## Optional pre-install of censhare-Service-Client.
+## VERSION is a normal build arg. Repository credentials are passed as BuildKit
+## secrets (repo_user, repo_pass): they are mounted only for the RUN step below
+## and never stored in build args, the build cache, layers or image metadata.
+##   docker buildx build --secret id=repo_user,env=REPO_USER \
+##     --secret id=repo_pass,env=REPO_PASS --build-arg VERSION=2025.2.0 ...
 ARG VERSION
 
 # Copy docker build directory, in case  additional resources are provided, such as iccprofiles
 COPY . /app
 
 ## Optionally download and install censhare-Service-Client during build
-RUN if [ -n "$REPO_USER" ] && [ -n "$REPO_PASS" ] && [ -n "$VERSION" ]; then \
+RUN --mount=type=secret,id=repo_user,required=false \
+    --mount=type=secret,id=repo_pass,required=false \
+    set -eu; \
+    if [ -s /run/secrets/repo_user ] && [ -s /run/secrets/repo_pass ]; then \
+        if [ -z "${VERSION:-}" ]; then \
+            echo "Repository secrets given but VERSION is not set; pass --build-arg VERSION=<version>." >&2; \
+            exit 1; \
+        fi; \
         groupadd -g 861 corpus; \
         useradd -d /opt/corpus -u 861 -g 861 -m corpus; \
-        wget --user=$REPO_USER --password=$REPO_PASS https://rpm.censhare.com/censhare-release/censhare-Service/v$VERSION/Shell/censhare-Service-Client-v$VERSION.tar.gz -O /tmp/censhare-client.tar.gz && \
-        tar -xzf /tmp/censhare-client.tar.gz -C /opt/corpus && \
-        chown -R corpus:corpus /opt/corpus && \
-        mkdir -p /opt/corpus/censhare && \
-        echo "$VERSION" > /opt/corpus/censhare/client-version.txt && \
+        wget --quiet \
+            --user="$(cat /run/secrets/repo_user)" \
+            --password="$(cat /run/secrets/repo_pass)" \
+            -O /tmp/censhare-client.tar.gz \
+            "https://rpm.censhare.com/censhare-release/censhare-Service/v${VERSION}/Shell/censhare-Service-Client-v${VERSION}.tar.gz"; \
+        tar -xzf /tmp/censhare-client.tar.gz -C /opt/corpus; \
+        chown -R corpus:corpus /opt/corpus; \
+        mkdir -p /opt/corpus/censhare; \
+        echo "$VERSION" > /opt/corpus/censhare/client-version.txt; \
         rm -f /tmp/censhare-client.tar.gz; \
+    elif [ -s /run/secrets/repo_user ] || [ -s /run/secrets/repo_pass ]; then \
+        echo "Both secrets repo_user and repo_pass are required to pre-install the Service-Client." >&2; \
+        exit 1; \
     fi
 
 # Create the directory to ensure it always exists
