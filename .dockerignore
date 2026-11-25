@@ -1,0 +1,26 @@
+# Keep the build context small and free of local secrets. The Dockerfile copies
+# the whole context ("COPY . /app") so an optional iccprofiles/ folder can be
+# baked in; nothing else from the working tree belongs in the image.
+.git
+.github
+.gitignore
+.dockerignore
+.pre-commit-config.yaml
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+.coverage
+coverage.xml
+htmlcov
+
+# Local credentials and environment files must never reach the build context.
+.env
+.env.*
+*.env
+*.pem
+*.key
+.netrc
+secrets
