@@ -14,7 +14,7 @@ This repository provides a Docker image and entrypoint to run the censhare-Servi
 ## Overview
 
 - Runs censhare-Service-Client in a container with common media tooling
-- Dynamic or pre-installed Service-Client (via `REPO_USER`, `REPO_PASS`, `VERSION`)
+- Dynamic or pre-installed Service-Client (repository credentials as runtime variables or BuildKit build secrets)
 - Flexible configuration via environment variables and JSON volume config
 - Graceful shutdown handling for data integrity
 - Automatic Java runtime selection (Corretto 11/17/21/25) matching Service-Client version
@@ -43,12 +43,16 @@ docker run -d --name csclient1 \
 Pre-install the Service-Client at build time and run:
 
 ```bash
-# Build with Service-Client baked in
-docker build \
-  --build-arg REPO_USER=youruser \
-  --build-arg REPO_PASS=yourpass \
+# Repository credentials come from the build environment as BuildKit secrets.
+export REPO_USER=youruser
+export REPO_PASS=yourpass
+
+# Build with Service-Client and the matching Corretto JDK baked in
+docker buildx build \
+  --secret id=repo_user,env=REPO_USER \
+  --secret id=repo_pass,env=REPO_PASS \
   --build-arg VERSION=2025.2.0 \
-  -t cs-service-client:2025.2.0 .
+  -t cs-service-client:2025.2.0 --load .
 
 # Run the pre-installed image (pass only connection settings)
 docker run -d --name csclient1 \
@@ -56,15 +60,30 @@ docker run -d --name csclient1 \
   cs-service-client:2025.2.0
 ```
 
+Example for an arm64 image (for example AWS Fargate on Graviton) with an older Service-Client. Nothing is downloaded at container start: censhare 2021.1 gets Corretto 11 (see [Java Runtime Selection](#java-runtime-selection)).
+
+```bash
+docker buildx build --platform linux/arm64 \
+  --secret id=repo_user,env=REPO_USER \
+  --secret id=repo_pass,env=REPO_PASS \
+  --build-arg VERSION=2021.1.11 \
+  -t <repo>:<tag> --load .
+```
+
+Building for another architecture than the build host runs under QEMU emulation. Because ImageMagick, Ghostscript, FFmpeg and pngquant are compiled from source, this can take hours; build on a native host of the target architecture where possible.
+
 Note: If an `iccprofiles` folder exists in the build context, it is copied into the image. On container start its contents are copied to `/opt/corpus/censhare/censhare-Service-Client/config/iccprofile`.
 
 ## Configuration
 
-### Build-time variables
+### Build-time variables and secrets
 
-- `REPO_USER`: Username for the repository hosting the Service-Client. Required when pre-installing during build.
-- `REPO_PASS`: Password for the repository. Used with `REPO_USER`.
-- `VERSION`: Version of the Service-Client to download and install.
+- `VERSION` (build arg): Version of the Service-Client to pre-install. Also selects the Corretto JDK that is baked into the image, even without repository secrets.
+- `repo_user` / `repo_pass` (BuildKit secrets): Repository credentials, required together to pre-install the Service-Client. Pass them with `--secret id=repo_user,env=REPO_USER --secret id=repo_pass,env=REPO_PASS` (or `src=<file>`).
+
+The credentials are mounted only for the download step. They are not build args, so they do not end up in image layers, image metadata, the build cache or build provenance. Passing `REPO_USER`/`REPO_PASS` as `--build-arg` is no longer supported and has no effect. The build fails if only one of the two secrets is given, or if secrets are given without `VERSION`.
+
+A `.dockerignore` keeps `.git`, `.env` files and other local files out of the build context. Only an optional `iccprofiles/` folder is taken into the image.
 
 ### Runtime variables
 
@@ -82,7 +101,9 @@ Note: If an `iccprofiles` folder exists in the build context, it is copied into 
 - `OFFICE_URL`: URL of an office conversion service. If unset or unreachable, office previews are disabled.
 - `OFFICE_VALIDATE_CERTS`: Validate SSL certificates for `OFFICE_URL`. Set to `false` to disable validation.
 - `VOLUMES_INFO`: JSON string to fully replace the `volumes` section in `hosts.xml`.
-- `REPO_USER`, `REPO_PASS`, `VERSION`: May also be provided at runtime to download/configure the Service-Client if not pre-installed.
+- `REPO_USER`, `REPO_PASS`, `VERSION`: May also be provided at runtime to download/configure the Service-Client if not pre-installed. The credentials are sent as HTTP basic authentication (special characters in the password are fine).
+
+`REPO_USER`, `REPO_PASS` and `SVC_PASS` are removed from the environment right after start, and `VOLUMES_INFO` once `hosts.xml` is written, so the Service-Client JVM and the media tools do not inherit them. On orchestrators, inject these values from a secret store (for example ECS task definition `secrets` or Docker/Kubernetes secrets) rather than as plain environment values.
 
 ### Tool-specific timeouts
 

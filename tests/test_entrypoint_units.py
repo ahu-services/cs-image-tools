@@ -6,6 +6,8 @@ error-handling paths that otherwise go uncovered.
 """
 
 import importlib.util
+import os
+import re
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
@@ -179,6 +181,7 @@ def test_configure_policy_warns_on_parse_error(tmp_path, capsys):
         (None, entrypoint.JAVA_DEFAULT),
         ("2022", entrypoint.JAVA_DEFAULT),  # too few parts
         ("abc.def", entrypoint.JAVA_DEFAULT),  # unparseable
+        ("2021.1.11", 11),  # 202101 <= 202201, pre-installed 2021.1 images
         ("2022.1", 11),  # 202201 <= 202201
         ("2024.3", 17),  # 202403 <= 202403
         ("2025.1", 21),  # 202501 <= 202599
@@ -613,3 +616,93 @@ def test_determine_serviceclient_version_warns_on_missing_file(tmp_path, capsys)
     missing = tmp_path / "serviceclient.sh"
     assert entrypoint._determine_serviceclient_version(str(missing)) is None
     assert "Unable to read" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------- #
+# Java matrix: Dockerfile (build-time pre-install) must match entrypoint.py
+# --------------------------------------------------------------------------- #
+def _dockerfile_java_matrix():
+    dockerfile = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+    windows = [
+        (int(bound), int(jdk))
+        for bound, jdk in re.findall(
+            r'"\$RELEASE_KEY" -le (\d+) \]; then \\\s*JDK_RESOLVED=(\d+)',
+            dockerfile,
+        )
+    ]
+    default = re.search(r"else \\\s*JDK_RESOLVED=(\d+)", dockerfile)
+    return windows, int(default.group(1)) if default else None
+
+
+def test_dockerfile_java_matrix_matches_entrypoint():
+    windows, default = _dockerfile_java_matrix()
+    assert windows == entrypoint.JAVA_WINDOWS
+    assert default == entrypoint.JAVA_DEFAULT
+
+
+# --------------------------------------------------------------------------- #
+# Credential handling
+# --------------------------------------------------------------------------- #
+def test_dockerfile_uses_build_secrets_not_credential_args():
+    dockerfile = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+    assert not re.search(r"^\s*ARG\s+REPO_(USER|PASS)\b", dockerfile, re.MULTILINE)
+    assert "--mount=type=secret,id=repo_user" in dockerfile
+    assert "--mount=type=secret,id=repo_pass" in dockerfile
+    assert re.search(r"^ARG VERSION$", dockerfile, re.MULTILINE)
+
+
+def test_client_download_url_contains_no_credentials():
+    url = entrypoint.client_download_url("2021.1.11")
+    assert url == (
+        "https://rpm.censhare.com/censhare-release/censhare-Service/v2021.1.11"
+        "/Shell/censhare-Service-Client-v2021.1.11.tar.gz"
+    )
+    assert "@" not in url
+
+
+def test_download_unpack_sends_credentials_as_basic_auth(monkeypatch, tmp_path):
+    calls = {}
+
+    class DummyResponse:
+        status_code = 401
+
+    def fake_get(url, **kwargs):
+        calls["url"] = url
+        calls["kwargs"] = kwargs
+        return DummyResponse()
+
+    monkeypatch.setattr(entrypoint.requests, "get", fake_get)
+    url = entrypoint.client_download_url("2025.2.0")
+    with pytest.raises(SystemExit):
+        entrypoint.download_unpack(
+            url, str(tmp_path / "out.tar.gz"), auth=("user", "p@ss:w/rd#1")
+        )
+    assert calls["url"] == url
+    assert calls["kwargs"]["auth"] == ("user", "p@ss:w/rd#1")
+
+
+def test_scrub_environment_hides_secrets_from_child_processes(monkeypatch):
+    monkeypatch.setenv("REPO_USER", "repo-user")
+    monkeypatch.setenv("REPO_PASS", "repo-secret")
+    monkeypatch.setenv("SVC_PASS", "svc-secret")
+    monkeypatch.setenv("SVC_HOST", "host.example.com")
+
+    entrypoint.scrub_environment(entrypoint.STARTUP_SECRET_ENV_VARS)
+
+    for name in entrypoint.STARTUP_SECRET_ENV_VARS:
+        assert name not in os.environ
+    child_env = subprocess.run(
+        [sys.executable, "-c", "import os; print(sorted(os.environ))"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert "REPO_PASS" not in child_env
+    assert "SVC_PASS" not in child_env
+    assert "SVC_HOST" in child_env
+
+
+def test_scrub_environment_ignores_missing_variables(monkeypatch):
+    monkeypatch.delenv("VOLUMES_INFO", raising=False)
+    entrypoint.scrub_environment(entrypoint.CONFIG_SECRET_ENV_VARS)
+    assert "VOLUMES_INFO" not in os.environ

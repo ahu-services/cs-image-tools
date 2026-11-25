@@ -32,6 +32,16 @@ DEFAULT_IMAGEMAGICK_POLICY_PATH = "/usr/local/etc/ImageMagick-7/policy.xml"
 MIB = 1024 * 1024
 GIB = 1024 * MIB
 RMI_HOST_OPTION_PATTERN = re.compile(r"-Djava\.rmi\.server\.hostname=([^\s]+)")
+CLIENT_DOWNLOAD_URL = (
+    "https://rpm.censhare.com/censhare-release/censhare-Service/v{version}"
+    "/Shell/censhare-Service-Client-v{version}.tar.gz"
+)
+# Credentials read at start. They are removed from the environment before any
+# child process runs, so the Service-Client JVM and the media tools never
+# inherit them (they would otherwise be readable in /proc/<pid>/environ).
+STARTUP_SECRET_ENV_VARS = ("REPO_USER", "REPO_PASS", "SVC_PASS")
+# VOLUMES_INFO may carry storage secrets; it is needed until hosts.xml is written.
+CONFIG_SECRET_ENV_VARS = ("VOLUMES_INFO",)
 
 
 def _determine_serviceclient_version(script_path=SERVICECLIENT_SCRIPT):
@@ -288,21 +298,39 @@ def apply_rmi_callback_host(callback_host):
     print(f"Configured SERVICECLIENT_JAVA_OPTIONS ({source}): {combined_opts}")
 
 
-def download_unpack(url, output_path):
+def client_download_url(version):
+    """
+    Returns the repository URL of the Service-Client archive for a version.
+    The URL never contains credentials; pass them to download_unpack as auth.
+    """
+    return CLIENT_DOWNLOAD_URL.format(version=version)
+
+
+def scrub_environment(names):
+    """
+    Removes the given variables from this process's environment so that child
+    processes started afterwards do not inherit them.
+    """
+    for name in names:
+        os.environ.pop(name, None)
+
+
+def download_unpack(url, output_path, auth=None):
     """
     Downloads and unpacks a tar.gz file from a given URL to /opt/corpus directory.
     Change owner and group for the unpacked files to "corpus".
 
     Args:
-    url (str): URL to fetch the tar.gz from.
+    url (str): URL to fetch the tar.gz from. Must not contain credentials.
     output_path (str): Local path to save the tar.gz file.
+    auth (tuple): Optional (user, password) for HTTP basic authentication.
 
     Raises:
     SystemExit: If the download fails or the HTTP status is not 200.
     """
     # (connect timeout, read timeout) so a stalled connection fails fast instead
     # of hanging the container start indefinitely.
-    response = requests.get(url, stream=True, timeout=(10, 60))
+    response = requests.get(url, stream=True, timeout=(10, 60), auth=auth)
     if response.status_code != 200:
         print(f"Failed to download the file (HTTP {response.status_code}).")
         sys.exit(1)
@@ -895,6 +923,9 @@ if __name__ == "__main__":
     svc_user = os.getenv("SVC_USER")
     svc_pass = os.getenv("SVC_PASS")
     svc_host = os.getenv("SVC_HOST")
+    repo_user = os.getenv("REPO_USER")
+    repo_pass = os.getenv("REPO_PASS")
+    scrub_environment(STARTUP_SECRET_ENV_VARS)
     if not all([svc_user, svc_pass, svc_host]):
         print("Required variables (SVC_USER, SVC_PASS, SVC_HOST) are not set.")
         sys.exit(1)
@@ -903,8 +934,6 @@ if __name__ == "__main__":
     client_installed = os.path.exists("/opt/corpus/censhare/censhare-Service-Client")
     client_version = None
     if not client_installed:
-        repo_user = os.getenv("REPO_USER")
-        repo_pass = os.getenv("REPO_PASS")
         version = client_version_env
         if not all([repo_user, repo_pass, version]):
             print(
@@ -912,8 +941,11 @@ if __name__ == "__main__":
             )
             sys.exit(1)
 
-        download_url = f"https://{repo_user}:{repo_pass}@rpm.censhare.com/censhare-release/censhare-Service/v{version}/Shell/censhare-Service-Client-v{version}.tar.gz"
-        download_unpack(download_url, "/tmp/censhare-client.tar.gz")
+        download_unpack(
+            client_download_url(version),
+            "/tmp/censhare-client.tar.gz",
+            auth=(repo_user, repo_pass),
+        )
         store_client_version(version)
         client_version = version
     elif client_version_env:
@@ -958,6 +990,7 @@ if __name__ == "__main__":
     ]
     run_as_corpus(setup_command, input_data="Y\n" * 10)
     configure_xml(svc_host, svc_user)
+    scrub_environment(CONFIG_SECRET_ENV_VARS)
     run_as_corpus(start_command)
 
     # Log output handling
