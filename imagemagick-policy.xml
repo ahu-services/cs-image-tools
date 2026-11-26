@@ -44,7 +44,10 @@
   <!-- Set maximum parallel threads. -->
   <policy domain="resource" name="thread" value="2"/>
   <!-- Set maximum time in seconds. When this limit is exceeded, an exception
-       is thrown and processing stops. -->
+       is thrown and processing stops. Local deviation: kept at 120 although
+       the censhare facility timeout is longer, because censhare commands may
+       give up earlier and leave the process running; this limit then ends
+       it. Override with IMAGEMAGICK_POLICY_TIME. -->
   <policy domain="resource" name="time" value="120"/>
   <!-- Set maximum number of open pixel cache files. When this limit is
        exceeded, any subsequent pixels cached to disk are closed and reopened
@@ -59,7 +62,8 @@
        disk. -->
   <policy domain="resource" name="map" value="4GiB"/>
   <!-- Set the maximum width * height of an image that can reside in the pixel
-       cache memory. Images that exceed the area limit are cached to disk. -->
+       cache memory. Images that exceed the area limit are cached to disk
+       (they are not rejected; width/height below reject). -->
   <policy domain="resource" name="area" value="400MP"/>
   <!-- Set maximum amount of disk space in bytes permitted for use by the pixel
        cache. When this limit is exceeded, the pixel cache is not be created
@@ -69,11 +73,11 @@
        exceeded, an exception is thrown. -->
   <policy domain="resource" name="list-length" value="256"/>
   <!-- Set the maximum width of an image.  When this limit is exceeded, an
-       exception is thrown. -->
-  <policy domain="resource" name="width" value="20KP"/>
+       exception is thrown. Local deviation: 32KP for large scans. -->
+  <policy domain="resource" name="width" value="32KP"/>
   <!-- Set the maximum height of an image.  When this limit is exceeded, an
-       exception is thrown. -->
-  <policy domain="resource" name="height" value="20KP"/>
+       exception is thrown. Local deviation: 32KP for large scans. -->
+  <policy domain="resource" name="height" value="32KP"/>
   <!-- Periodically yield the CPU for at least the time specified in
        milliseconds. -->
   <!-- <policy domain="resource" name="throttle" value="2"/> -->
@@ -116,6 +120,9 @@
        performance penalty but with improved security. -->
   <policy domain="system" name="memory-map" value="anonymous"/>
   <!-- Set the maximum amount of memory in bytes that are permitted for
-       allocation requests. -->
-  <policy domain="system" name="max-memory-request" value="1GiB"/>
+       allocation requests. This is the largest single allocation, not a
+       cache budget: embedded profiles such as the Photoshop layer block of
+       layered TIFF masters (tag 37724) are read in one piece, cannot spill to
+       disk and reach about 1 GB. Local deviation: 1536MiB. -->
+  <policy domain="system" name="max-memory-request" value="1536MiB"/>
 </policymap>

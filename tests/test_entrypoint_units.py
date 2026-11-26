@@ -26,6 +26,18 @@ sys.modules["entrypoint_units_module"] = entrypoint
 spec.loader.exec_module(entrypoint)
 
 
+@pytest.fixture(autouse=True)
+def _isolated_imagemagick_env(monkeypatch, tmp_path):
+    """Keep policy tests away from the host: temp dir, env overrides, ECS."""
+    for name in list(entrypoint.os.environ):
+        if name.startswith("IMAGEMAGICK_"):
+            monkeypatch.delenv(name, raising=False)
+    for name in ("ECS_CONTAINER_METADATA_URI_V4", "CONTAINER_MEMORY_LIMIT"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv("MAGICK_TEMPORARY_PATH", raising=False)
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
+
+
 # --------------------------------------------------------------------------- #
 # str_to_bool
 # --------------------------------------------------------------------------- #
@@ -706,3 +718,510 @@ def test_scrub_environment_ignores_missing_variables(monkeypatch):
     monkeypatch.delenv("VOLUMES_INFO", raising=False)
     entrypoint.scrub_environment(entrypoint.CONFIG_SECRET_ENV_VARS)
     assert "VOLUMES_INFO" not in os.environ
+
+
+# --------------------------------------------------------------------------- #
+# ImageMagick policy sizing, overrides and diagnostics
+# --------------------------------------------------------------------------- #
+GIB = entrypoint.GIB
+MIB = entrypoint.MIB
+
+BUNDLED_POLICY = """<?xml version="1.0" encoding="UTF-8"?>
+<policymap>
+  <policy domain="resource" name="thread" value="2"/>
+  <policy domain="resource" name="time" value="120"/>
+  <policy domain="resource" name="memory" value="2GiB"/>
+  <policy domain="resource" name="map" value="4GiB"/>
+  <policy domain="resource" name="area" value="400MP"/>
+  <policy domain="resource" name="disk" value="10GiB"/>
+  <policy domain="resource" name="list-length" value="256"/>
+  <policy domain="resource" name="width" value="32KP"/>
+  <policy domain="resource" name="height" value="32KP"/>
+  <policy domain="cache" name="memory-map" value="anonymous"/>
+  <policy domain="system" name="shred" value="1"/>
+  <policy domain="system" name="max-memory-request" value="1536MiB"/>
+</policymap>
+"""
+
+
+def _policy(tmp_path, content=BUNDLED_POLICY):
+    path = tmp_path / "policy.xml"
+    path.write_text(content)
+    return path
+
+
+def _value(path, name, domain="resource"):
+    node = (
+        ET.parse(path).getroot().find(f"./policy[@domain='{domain}'][@name='{name}']")
+    )
+    return node.get("value") if node is not None else None
+
+
+def _fake_host(monkeypatch, memory=None, cpu=(1.0, "cgroup"), free=45 * GIB):
+    monkeypatch.setattr(
+        entrypoint, "detect_container_memory_limit_bytes", lambda: memory
+    )
+    monkeypatch.setattr(entrypoint, "detect_cpu_limit", lambda ecs_limits=None: cpu)
+    monkeypatch.setattr(
+        entrypoint.shutil,
+        "disk_usage",
+        lambda path: entrypoint.shutil._ntuple_diskusage(0, 0, free),
+    )
+
+
+@pytest.mark.parametrize(
+    ("memory", "instances", "cpus", "expected"),
+    [
+        # Fargate 1 vCPU / 8 GB / 4 instances (current production size)
+        (8 * GIB, 4, 1.0, ("1", "512MiB", "1GiB", "9GiB")),
+        # Fargate 2 vCPU / 16 GB / 8 instances (planned for busy servers)
+        (16 * GIB, 8, 2.0, ("1", "512MiB", "1GiB", "4608MiB")),
+        # Small single-instance container
+        (4 * GIB, 1, 1.0, ("1", "512MiB", "1GiB", "36GiB")),
+        # Large container: pixel cache budget grows, capped by the bundled values
+        (32 * GIB, 4, 4.0, ("1", "1664MiB", "3328MiB", "9GiB")),
+    ],
+)
+def test_recommend_policy_sizes(memory, instances, cpus, expected):
+    result = entrypoint.recommend_imagemagick_policy(memory, instances, cpus, 45 * GIB)
+    thread, memory_limit, map_limit, disk = expected
+    assert result == {
+        "thread": thread,
+        "memory": memory_limit,
+        "map": map_limit,
+        "disk": disk,
+        "max-memory-request": "1536MiB",
+    }
+
+
+def test_max_memory_request_is_independent_of_container_size():
+    small = entrypoint.recommend_imagemagick_policy(2 * GIB, 8)
+    large = entrypoint.recommend_imagemagick_policy(64 * GIB, 1)
+    assert small["max-memory-request"] == large["max-memory-request"] == "1536MiB"
+
+
+@pytest.mark.parametrize(
+    ("memory", "fits"), [(4 * GIB, 1), (8 * GIB, 2), (16 * GIB, 4)]
+)
+def test_large_jobs_that_fit(memory, fits):
+    assert entrypoint.large_jobs_that_fit(memory) == fits
+
+
+def test_threads_follow_cpu_quota_per_instance():
+    assert entrypoint.recommend_imagemagick_policy(8 * GIB, 2, 4.0)["thread"] == "2"
+    assert entrypoint.recommend_imagemagick_policy(8 * GIB, 1, 16.0)["thread"] == "4"
+    assert entrypoint.recommend_imagemagick_policy(8 * GIB, 4, 0.5)["thread"] == "1"
+
+
+def test_disk_without_temp_information_uses_memory_based_fallback():
+    assert entrypoint.recommend_imagemagick_policy(8 * GIB, 4)["disk"] == "9728MiB"
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("1536MiB", 1536 * MIB),
+        ("2GiB", 2 * GIB),
+        ("1.5GiB", int(1.5 * GIB)),
+        ("1GB", 1000**3),
+        ("1048576", 1048576),
+        ("lots", None),
+        (None, None),
+    ],
+)
+def test_parse_policy_size(value, expected):
+    assert entrypoint.parse_policy_size(value) == expected
+
+
+def test_read_policy_overrides_maps_names_and_validates():
+    overrides, ignored = entrypoint.read_policy_overrides(
+        {
+            "IMAGEMAGICK_POLICY_TIME": "300",
+            "IMAGEMAGICK_POLICY_LIST_LENGTH": "64",
+            "IMAGEMAGICK_POLICY_WIDTH": "40KP",
+            "IMAGEMAGICK_POLICY_AREA": "1GP",
+            "IMAGEMAGICK_POLICY_MAX_MEMORY_REQUEST": "2GiB",
+            "IMAGEMAGICK_POLICY_TEMPORARY_PATH": "/data/magick",
+            "IMAGEMAGICK_POLICY_THREAD": "0",
+            "IMAGEMAGICK_POLICY_HEIGHT": "tall",
+            "IMAGEMAGICK_POLICY_SHRED": "0",
+            "IMAGEMAGICK_POLICY_AUTOCONFIG": "true",
+            "IMAGEMAGICK_POLICY_MEMORY": "  ",
+            "OTHER": "1",
+        }
+    )
+    assert overrides == {
+        "time": "300",
+        "list-length": "64",
+        "width": "40KP",
+        "area": "1GP",
+        "max-memory-request": "2GiB",
+        "temporary-path": "/data/magick",
+    }
+    assert ignored == [
+        "IMAGEMAGICK_POLICY_HEIGHT=tall (invalid value)",
+        "IMAGEMAGICK_POLICY_SHRED (unknown policy setting)",
+        "IMAGEMAGICK_POLICY_THREAD=0 (invalid value)",
+    ]
+
+
+def test_configure_policy_logs_values_with_sources(monkeypatch, tmp_path, capsys):
+    path = _policy(tmp_path)
+    _fake_host(monkeypatch, memory=8 * GIB)
+    monkeypatch.setenv("IMAGEMAGICK_POLICY_AUTOCONFIG", "true")
+    monkeypatch.setenv("SVC_INSTANCES", "4")
+    monkeypatch.setenv("IMAGEMAGICK_POLICY_TIME", "300")
+    monkeypatch.setenv("IMAGEMAGICK_POLICY_WIDTH", "bogus")
+    monkeypatch.setenv("IMAGEMAGICK_TIMEOUT", "600")
+
+    entrypoint.configure_imagemagick_policy(str(path))
+    out = capsys.readouterr().out
+
+    assert "detected: memory limit 8.0GiB (cgroup), SVC_INSTANCES=4" in out
+    assert "cpu 1 (cgroup)" in out
+    assert "memory=512MiB (autoconfig)" in out
+    assert "disk=9GiB (autoconfig)" in out
+    assert "max-memory-request=1536MiB (autoconfig)" in out
+    assert "time=300 (env IMAGEMAGICK_POLICY_TIME)" in out
+    assert "width=32KP (bundled)" in out
+    assert "ignored: IMAGEMAGICK_POLICY_WIDTH=bogus (invalid value)" in out
+    assert "imagemagick facility timeout: 600s (IMAGEMAGICK_TIMEOUT)" in out
+    assert "WARNING" not in out
+    assert _value(path, "time") == "300"
+    assert _value(path, "width") == "32KP"
+    assert _value(path, "shred", "system") == "1"
+    assert f"temp {tmp_path} free 45.0GiB" in out
+
+
+def test_autoconfig_never_lowers_bundled_max_memory_request(monkeypatch, tmp_path):
+    path = _policy(tmp_path, BUNDLED_POLICY.replace('"1536MiB"', '"3GiB"'))
+    _fake_host(monkeypatch, memory=8 * GIB)
+    monkeypatch.setenv("IMAGEMAGICK_POLICY_AUTOCONFIG", "true")
+
+    entrypoint.configure_imagemagick_policy(str(path))
+
+    assert _value(path, "max-memory-request", "system") == "3GiB"
+    assert _value(path, "memory") == "512MiB"
+
+
+def test_explicit_env_may_lower_max_memory_request(monkeypatch, tmp_path):
+    path = _policy(tmp_path)
+    _fake_host(monkeypatch, memory=8 * GIB)
+    monkeypatch.setenv("IMAGEMAGICK_POLICY_AUTOCONFIG", "true")
+    monkeypatch.setenv("IMAGEMAGICK_POLICY_MAX_MEMORY_REQUEST", "256MiB")
+
+    entrypoint.configure_imagemagick_policy(str(path))
+
+    assert _value(path, "max-memory-request", "system") == "256MiB"
+
+
+def test_removed_override_is_reverted_on_restart(monkeypatch, tmp_path):
+    path = _policy(tmp_path)
+    _fake_host(monkeypatch)
+    monkeypatch.setenv("IMAGEMAGICK_POLICY_MEMORY", "768MiB")
+    entrypoint.configure_imagemagick_policy(str(path))
+    assert _value(path, "memory") == "768MiB"
+
+    monkeypatch.delenv("IMAGEMAGICK_POLICY_MEMORY")
+    entrypoint.configure_imagemagick_policy(str(path))
+
+    assert _value(path, "memory") == "2GiB"
+    assert (tmp_path / "policy.xml.dist").exists()
+
+
+def test_autoconfig_without_memory_limit_warns_and_keeps_bundled(
+    monkeypatch, tmp_path, capsys
+):
+    path = _policy(tmp_path)
+    _fake_host(monkeypatch, memory=None)
+    monkeypatch.setenv("IMAGEMAGICK_POLICY_AUTOCONFIG", "true")
+
+    entrypoint.configure_imagemagick_policy(str(path))
+    out = capsys.readouterr().out
+
+    assert "no memory limit was detected" in out
+    assert _value(path, "memory") == "2GiB"
+    assert _value(path, "max-memory-request", "system") == "1536MiB"
+
+
+def test_autoconfig_warns_when_large_jobs_do_not_fit(monkeypatch, tmp_path, capsys):
+    path = _policy(tmp_path)
+    _fake_host(monkeypatch, memory=6 * GIB)
+    monkeypatch.setenv("IMAGEMAGICK_POLICY_AUTOCONFIG", "true")
+    monkeypatch.setenv("SVC_INSTANCES", "4")
+
+    entrypoint.configure_imagemagick_policy(str(path))
+
+    assert "memory for 1 concurrent large layered-TIFF" in capsys.readouterr().out
+
+
+def test_autoconfig_falls_back_to_ecs_task_metadata(monkeypatch, tmp_path, capsys):
+    path = _policy(tmp_path)
+    monkeypatch.setattr(entrypoint, "detect_container_memory_limit_bytes", lambda: None)
+    monkeypatch.setattr(entrypoint, "_read_first_line", lambda path: None)
+    monkeypatch.setattr(
+        entrypoint.shutil,
+        "disk_usage",
+        lambda path: entrypoint.shutil._ntuple_diskusage(0, 0, 45 * GIB),
+    )
+    monkeypatch.setenv("IMAGEMAGICK_POLICY_AUTOCONFIG", "true")
+    monkeypatch.setenv("ECS_CONTAINER_METADATA_URI_V4", "http://169.254.170.2/v4/x")
+    requested = []
+
+    class Response:
+        status_code = 200
+
+        def json(self):
+            return {"Limits": {"CPU": 1, "Memory": 8192}}
+
+    def fake_get(url, timeout):
+        requested.append((url, timeout))
+        return Response()
+
+    monkeypatch.setattr(entrypoint.requests, "get", fake_get)
+
+    entrypoint.configure_imagemagick_policy(str(path))
+    out = capsys.readouterr().out
+
+    assert requested == [("http://169.254.170.2/v4/x/task", 1.0)]
+    assert "memory limit 8.0GiB (ECS task metadata)" in out
+    assert "cpu 1 (ECS task metadata)" in out
+    assert _value(path, "disk") == "9GiB"
+
+
+def test_read_ecs_task_limits_handles_errors(monkeypatch, capsys):
+    assert entrypoint.read_ecs_task_limits() is None
+    monkeypatch.setenv("ECS_CONTAINER_METADATA_URI_V4", "http://169.254.170.2/v4/x")
+
+    def boom(url, timeout):
+        raise entrypoint.requests.ConnectionError("down")
+
+    monkeypatch.setattr(entrypoint.requests, "get", boom)
+    assert entrypoint.read_ecs_task_limits() is None
+    assert "Unable to read ECS task metadata" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("files", "ecs", "expected"),
+    [
+        ({"/sys/fs/cgroup/cpu.max": "200000 100000"}, None, (2.0, "cgroup")),
+        (
+            {
+                "/sys/fs/cgroup/cpu.max": "max 100000",
+                "/sys/fs/cgroup/cpu/cpu.cfs_quota_us": "50000",
+                "/sys/fs/cgroup/cpu/cpu.cfs_period_us": "100000",
+            },
+            None,
+            (0.5, "cgroup"),
+        ),
+        (
+            {"/sys/fs/cgroup/cpu.max": "max 100000"},
+            {"CPU": 2},
+            (2.0, "ECS task metadata"),
+        ),
+    ],
+)
+def test_detect_cpu_limit(monkeypatch, files, ecs, expected):
+    monkeypatch.setattr(entrypoint, "_read_first_line", lambda path: files.get(path))
+    assert entrypoint.detect_cpu_limit(ecs) == expected
+
+
+def test_detect_cpu_limit_falls_back_to_online_cpus(monkeypatch):
+    monkeypatch.setattr(entrypoint, "_read_first_line", lambda path: None)
+    monkeypatch.setattr(entrypoint.os, "cpu_count", lambda: 3)
+    assert entrypoint.detect_cpu_limit() == (3.0, "online CPUs")
+
+
+def test_read_cgroup_memory_peak(monkeypatch):
+    values = {"/sys/fs/cgroup/memory/memory.max_usage_in_bytes": "1024"}
+    monkeypatch.setattr(entrypoint, "_read_first_line", lambda path: values.get(path))
+    assert entrypoint._read_cgroup_memory_peak() == 1024
+
+
+def test_configure_policy_without_variables_keeps_bundled_values(
+    monkeypatch, tmp_path, capsys
+):
+    path = _policy(tmp_path)
+    _fake_host(monkeypatch, memory=8 * GIB)
+
+    entrypoint.configure_imagemagick_policy(str(path))
+    out = capsys.readouterr().out
+
+    assert "(auto-configuration disabled)" in out
+    assert "memory limit 8.0GiB (cgroup)" in out
+    assert "(autoconfig)" not in out
+    assert "(env " not in out
+    for name, value in (("memory", "2GiB"), ("map", "4GiB"), ("thread", "2")):
+        assert _value(path, name) == value
+    assert _value(path, "max-memory-request", "system") == "1536MiB"
+    assert _value(path, "temporary-path") is None
+
+
+def test_container_memory_limit_variable_is_used_before_ecs(monkeypatch):
+    monkeypatch.setattr(entrypoint, "detect_container_memory_limit_bytes", lambda: None)
+    monkeypatch.setenv("CONTAINER_MEMORY_LIMIT", "16GiB")
+    monkeypatch.setenv("ECS_CONTAINER_METADATA_URI_V4", "http://169.254.170.2/v4/x")
+
+    def must_not_call(*args, **kwargs):
+        raise AssertionError("ECS metadata must not be queried")
+
+    monkeypatch.setattr(entrypoint.requests, "get", must_not_call)
+
+    assert entrypoint.detect_memory_limit() == (
+        16 * GIB,
+        "CONTAINER_MEMORY_LIMIT",
+        None,
+    )
+
+
+def test_invalid_container_memory_limit_is_ignored(monkeypatch, capsys):
+    monkeypatch.setattr(entrypoint, "detect_container_memory_limit_bytes", lambda: None)
+    monkeypatch.setenv("CONTAINER_MEMORY_LIMIT", "lots")
+
+    assert entrypoint.detect_memory_limit() == (None, None, None)
+    assert "Ignoring invalid CONTAINER_MEMORY_LIMIT=lots" in capsys.readouterr().out
+
+
+def test_cgroup_limit_wins_over_container_memory_limit(monkeypatch):
+    monkeypatch.setattr(
+        entrypoint, "detect_container_memory_limit_bytes", lambda: 4 * GIB
+    )
+    monkeypatch.setenv("CONTAINER_MEMORY_LIMIT", "16GiB")
+    assert entrypoint.detect_memory_limit() == (4 * GIB, "cgroup", None)
+
+
+def test_temporary_path_override_is_created(monkeypatch, tmp_path):
+    path = _policy(tmp_path)
+    _fake_host(monkeypatch)
+    target = tmp_path / "custom-temp"
+    monkeypatch.setenv("IMAGEMAGICK_POLICY_TEMPORARY_PATH", str(target))
+
+    entrypoint.configure_imagemagick_policy(str(path))
+
+    assert target.is_dir()
+    assert _value(path, "temporary-path") == str(target)
+
+
+def test_unusable_temporary_path_override_is_ignored(monkeypatch, tmp_path, capsys):
+    path = _policy(tmp_path)
+    _fake_host(monkeypatch)
+    blocker = tmp_path / "file"
+    blocker.write_text("x")
+    monkeypatch.setenv("IMAGEMAGICK_POLICY_TEMPORARY_PATH", str(blocker / "t"))
+
+    entrypoint.configure_imagemagick_policy(str(path))
+
+    assert "ignored: IMAGEMAGICK_POLICY_TEMPORARY_PATH" in capsys.readouterr().out
+    assert _value(path, "temporary-path") is None
+
+
+@pytest.mark.parametrize(
+    ("env", "expected"),
+    [
+        ({}, "/tmp"),
+        ({"TMPDIR": "/var/tmp"}, "/var/tmp"),
+        ({"TMPDIR": "/var/tmp", "MAGICK_TEMPORARY_PATH": "/scratch"}, "/scratch"),
+    ],
+)
+def test_imagemagick_temp_dir(monkeypatch, env, expected):
+    monkeypatch.delenv("TMPDIR", raising=False)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    assert entrypoint.imagemagick_temp_dir() == expected
+    assert entrypoint.imagemagick_temp_dir("/policy/tmp") == "/policy/tmp"
+
+
+def test_low_temp_space_warns_at_start(monkeypatch, tmp_path, capsys):
+    path = _policy(tmp_path)
+    _fake_host(monkeypatch, free=20 * GIB)
+    monkeypatch.setenv("SVC_INSTANCES", "4")
+
+    entrypoint.configure_imagemagick_policy(str(path))
+
+    assert "less than disk=10GiB x SVC_INSTANCES=4" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        ("low 0\nhigh 0\nmax 3\noom 1\noom_kill 2\noom_group_kill 0\n", 2),
+        ("oom_kill_disable 0\nunder_oom 0\noom_kill 5\n", 5),
+        ("oom_kill_disable 0\nunder_oom 0\n", None),
+    ],
+)
+def test_read_oom_kill_count_from_cgroup_files(
+    monkeypatch, tmp_path, content, expected
+):
+    events = tmp_path / "memory.events"
+    events.write_text(content)
+    monkeypatch.setattr(entrypoint, "CGROUP_OOM_EVENT_FILES", (str(events),))
+    monkeypatch.setattr(entrypoint, "_read_first_line", lambda path: None)
+
+    count, source = entrypoint.read_oom_kill_count()
+
+    assert count == expected
+    assert source == ("memory.events" if expected is not None else None)
+
+
+def test_read_oom_kill_count_falls_back_to_failcnt(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        entrypoint, "CGROUP_OOM_EVENT_FILES", (str(tmp_path / "missing"),)
+    )
+    monkeypatch.setattr(entrypoint, "_read_first_line", lambda path: "7")
+    assert entrypoint.read_oom_kill_count() == (7, "memory.failcnt")
+
+
+def test_memory_monitor_logs_only_rising_values(monkeypatch, capsys):
+    peaks = iter([1 * GIB, 1 * GIB, 3 * GIB, 3 * GIB])
+    ooms = iter([(0, "memory.events")] * 2 + [(2, "memory.events")] * 2)
+    monkeypatch.setattr(entrypoint, "_read_cgroup_memory_peak", lambda: next(peaks))
+    monkeypatch.setattr(entrypoint, "read_oom_kill_count", lambda: next(ooms))
+    sleeps = []
+
+    class Stop(Exception):
+        pass
+
+    def fake_sleep(seconds):
+        sleeps.append(seconds)
+        if len(sleeps) > 3:
+            raise Stop
+
+    monkeypatch.setattr(entrypoint.time, "sleep", fake_sleep)
+    with pytest.raises(Stop):
+        entrypoint.container_memory_monitor_loop(interval=60)
+    out = capsys.readouterr().out
+
+    assert sleeps == [60, 60, 60, 60]
+    assert out.count("Container memory peak") == 1
+    assert "Container memory peak: 3.0GiB." in out
+    assert out.count("killed for lack of memory") == 1
+    assert "2 process(es)" in out
+    assert "before monitoring" not in out
+
+
+def test_memory_monitor_reports_earlier_oom_kills(monkeypatch, capsys):
+    monkeypatch.setattr(entrypoint, "_read_cgroup_memory_peak", lambda: None)
+    monkeypatch.setattr(entrypoint, "read_oom_kill_count", lambda: (4, "memory.events"))
+
+    class Stop(Exception):
+        pass
+
+    def stop(seconds):
+        raise Stop
+
+    monkeypatch.setattr(entrypoint.time, "sleep", stop)
+    with pytest.raises(Stop):
+        entrypoint.container_memory_monitor_loop()
+
+    assert "OOM kills before monitoring: 4 (memory.events)" in capsys.readouterr().out
+
+
+def test_start_container_memory_monitor_runs_as_daemon(monkeypatch):
+    started = []
+    monkeypatch.setattr(
+        entrypoint, "container_memory_monitor_loop", lambda: started.append(True)
+    )
+    thread = entrypoint.start_container_memory_monitor()
+    thread.join(timeout=5)
+    assert started == [True]
+    assert thread.daemon

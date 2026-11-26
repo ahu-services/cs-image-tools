@@ -4,6 +4,8 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ENTRYPOINT_PATH = REPO_ROOT / "entrypoint.py"
 
@@ -11,6 +13,17 @@ spec = importlib.util.spec_from_file_location("entrypoint_module", ENTRYPOINT_PA
 entrypoint = importlib.util.module_from_spec(spec)
 sys.modules["entrypoint_module"] = entrypoint
 spec.loader.exec_module(entrypoint)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_imagemagick_env(monkeypatch, tmp_path):
+    """Keep policy tests away from the host: temp dir, env overrides, ECS."""
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
+    for name in list(entrypoint.os.environ):
+        if name.startswith("IMAGEMAGICK_"):
+            monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv("ECS_CONTAINER_METADATA_URI_V4", raising=False)
+    monkeypatch.delenv("CONTAINER_MEMORY_LIMIT", raising=False)
 
 
 def test_determine_serviceclient_version(tmp_path):
@@ -241,10 +254,20 @@ def test_configure_imagemagick_policy_autoconfigures_from_memory_limit(
     monkeypatch.setattr(
         entrypoint, "detect_container_memory_limit_bytes", lambda: 6 * entrypoint.GIB
     )
+    monkeypatch.setattr(
+        entrypoint, "detect_cpu_limit", lambda ecs_limits=None: (1.0, "cgroup")
+    )
+    monkeypatch.setattr(
+        entrypoint.shutil,
+        "disk_usage",
+        lambda path: entrypoint.shutil._ntuple_diskusage(0, 0, 40 * entrypoint.GIB),
+    )
 
     entrypoint.configure_imagemagick_policy(str(policy_path))
 
-    expected = entrypoint.recommend_imagemagick_policy(6 * entrypoint.GIB, 4)
+    expected = entrypoint.recommend_imagemagick_policy(
+        6 * entrypoint.GIB, 4, 1.0, 40 * entrypoint.GIB
+    )
     tree = ET.parse(policy_path)
     root = tree.getroot()
 
@@ -268,6 +291,7 @@ def test_configure_imagemagick_policy_autoconfigures_from_memory_limit(
         root.find("./policy[@domain='system'][@name='max-memory-request']").get("value")
         == expected["max-memory-request"]
     )
+    assert expected["max-memory-request"] == "1536MiB"
 
 
 def test_configure_imagemagick_policy_keeps_bundled_defaults_by_default(

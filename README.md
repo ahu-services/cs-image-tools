@@ -40,37 +40,17 @@ docker run -d --name csclient1 \
   cs-image-tools:v1.0
 ```
 
-Pre-install the Service-Client at build time and run:
+Published images never contain censhare software or censhare credentials. The Service-Client is downloaded at container start (above), or baked in by a private build of your own that goes only to a private registry.
 
-```bash
-# Repository credentials come from the build environment as BuildKit secrets.
-export REPO_USER=youruser
-export REPO_PASS=yourpass
-
-# Build with Service-Client and the matching Corretto JDK baked in
-docker buildx build \
-  --secret id=repo_user,env=REPO_USER \
-  --secret id=repo_pass,env=REPO_PASS \
-  --build-arg VERSION=2025.2.0 \
-  -t cs-service-client:2025.2.0 --load .
-
-# Run the pre-installed image (pass only connection settings)
-docker run -d --name csclient1 \
-  -e SVC_USER=user -e SVC_PASS=password -e SVC_HOST=host.example.com \
-  cs-service-client:2025.2.0
-```
-
-Example for an arm64 image (for example AWS Fargate on Graviton) with an older Service-Client. Nothing is downloaded at container start: censhare 2021.1 gets Corretto 11 (see [Java Runtime Selection](#java-runtime-selection)).
+Optional private build with the Service-Client and the matching Corretto JDK pre-installed (repository credentials as BuildKit secrets, so they stay out of the image and the build cache):
 
 ```bash
 docker buildx build --platform linux/arm64 \
-  --secret id=repo_user,env=REPO_USER \
-  --secret id=repo_pass,env=REPO_PASS \
-  --build-arg VERSION=2021.1.11 \
-  -t <repo>:<tag> --load .
+  --secret id=repo_user,env=REPO_USER --secret id=repo_pass,env=REPO_PASS \
+  --build-arg VERSION=2021.1.11 -t <repo>:<tag> --load .
 ```
 
-Building for another architecture than the build host runs under QEMU emulation. Because ImageMagick, Ghostscript, FFmpeg and pngquant are compiled from source, this can take hours; build on a native host of the target architecture where possible.
+Run it with the connection settings only (`SVC_USER`, `SVC_PASS`, `SVC_HOST`). Building for a different architecture than the build host runs under QEMU and can take hours.
 
 Note: If an `iccprofiles` folder exists in the build context, it is copied into the image. On container start its contents are copied to `/opt/corpus/censhare/censhare-Service-Client/config/iccprofile`.
 
@@ -78,12 +58,8 @@ Note: If an `iccprofiles` folder exists in the build context, it is copied into 
 
 ### Build-time variables and secrets
 
-- `VERSION` (build arg): Version of the Service-Client to pre-install. Also selects the Corretto JDK that is baked into the image, even without repository secrets.
-- `repo_user` / `repo_pass` (BuildKit secrets): Repository credentials, required together to pre-install the Service-Client. Pass them with `--secret id=repo_user,env=REPO_USER --secret id=repo_pass,env=REPO_PASS` (or `src=<file>`).
-
-The credentials are mounted only for the download step. They are not build args, so they do not end up in image layers, image metadata, the build cache or build provenance. Passing `REPO_USER`/`REPO_PASS` as `--build-arg` is no longer supported and has no effect. The build fails if only one of the two secrets is given, or if secrets are given without `VERSION`.
-
-A `.dockerignore` keeps `.git`, `.env` files and other local files out of the build context. Only an optional `iccprofiles/` folder is taken into the image.
+- `VERSION` (build arg): Service-Client version to pre-install; also selects the Corretto JDK baked into the image.
+- `repo_user` / `repo_pass` (BuildKit secrets, optional): repository credentials for a private pre-installed build, both required. `--build-arg REPO_USER/REPO_PASS` is not supported.
 
 ### Runtime variables
 
@@ -96,14 +72,13 @@ A `.dockerignore` keeps `.git`, `.env` files and other local files out of the bu
 - `CLIENT_MAP_HOST_FROM` / `CLIENT_MAP_HOST_TO`: Explicitly override the RMI host mapping baked into the stub (advanced NAT/PAT).
 - `CLIENT_MAP_PORT_FROM` / `CLIENT_MAP_PORT_TO`: Explicitly override RMI port mapping if the external callback port differs; otherwise left empty.
 - `SVC_INSTANCES`: Number of parallel worker instances. Default `4`.
-- `IMAGEMAGICK_POLICY_AUTOCONFIG`: Auto-tune ImageMagick limits from the detected container memory limit. Default `false`.
-- `IMAGEMAGICK_POLICY_MEMORY`, `IMAGEMAGICK_POLICY_MAP`, `IMAGEMAGICK_POLICY_DISK`, `IMAGEMAGICK_POLICY_THREAD`, `IMAGEMAGICK_POLICY_MAX_MEMORY_REQUEST`: Optional explicit overrides for ImageMagick resource limits.
+- `IMAGEMAGICK_POLICY_AUTOCONFIG`, `IMAGEMAGICK_POLICY_<NAME>`, `CONTAINER_MEMORY_LIMIT`: Optional ImageMagick tuning, see [ImageMagick policy](#imagemagick-policy).
 - `OFFICE_URL`: URL of an office conversion service. If unset or unreachable, office previews are disabled.
 - `OFFICE_VALIDATE_CERTS`: Validate SSL certificates for `OFFICE_URL`. Set to `false` to disable validation.
 - `VOLUMES_INFO`: JSON string to fully replace the `volumes` section in `hosts.xml`.
-- `REPO_USER`, `REPO_PASS`, `VERSION`: May also be provided at runtime to download/configure the Service-Client if not pre-installed. The credentials are sent as HTTP basic authentication (special characters in the password are fine).
+- `REPO_USER`, `REPO_PASS`, `VERSION`: Download the Service-Client at start if it is not pre-installed.
 
-`REPO_USER`, `REPO_PASS` and `SVC_PASS` are removed from the environment right after start, and `VOLUMES_INFO` once `hosts.xml` is written, so the Service-Client JVM and the media tools do not inherit them. On orchestrators, inject these values from a secret store (for example ECS task definition `secrets` or Docker/Kubernetes secrets) rather than as plain environment values.
+Credentials (`REPO_USER`, `REPO_PASS`, `SVC_PASS`, `VOLUMES_INFO`) are removed from the environment before the Service-Client starts; inject them from a secret store where your platform offers one.
 
 ### Tool-specific timeouts
 
@@ -230,6 +205,31 @@ ImageMagick features and delegates:
 Features: Cipher DPC HDRI Modules OpenMP(4.5)
 Delegates (built-in): bzlib cairo djvu fftw fontconfig fpx freetype gvc heic jbig jng jp2 jpeg jxl lcms ltdl lzma openexr pangocairo png raqm raw rsvg tiff uhdr webp wmf xml zip zlib zstd
 ```
+
+### ImageMagick policy
+
+The bundled [`imagemagick-policy.xml`](imagemagick-policy.xml) works without any configuration. The start log lists every effective value with its source (bundled, autoconfig or env), the detected memory limit, `SVC_INSTANCES`, the ImageMagick facility timeout and the free temp space. After the start, a growing container memory peak and every OOM kill (cgroup `memory.events`) are logged.
+
+| Setting | Default | Setting | Default |
+|---|---|---|---|
+| `memory` | 2GiB | `width` / `height` | 32KP (larger images are rejected) |
+| `map` | 4GiB | `area` | 400MP (larger images are cached to disk) |
+| `disk` | 10GiB | `time` | 120 s |
+| `thread` | 2 | `list-length` | 256 |
+| `file` | 768 | `max-memory-request` | 1536MiB |
+
+`max-memory-request` is the largest single allocation, not a cache budget: layered Photoshop TIFF masters carry their layers in one block of up to about 1 GB that cannot spill to disk.
+
+**Overrides:** `IMAGEMAGICK_POLICY_<NAME>` sets one value, with the name in upper case and `-` as `_`: `MEMORY`, `MAP`, `DISK`, `AREA`, `WIDTH`, `HEIGHT`, `TIME`, `THREAD`, `LIST_LENGTH`, `FILE`, `THROTTLE`, `TEMPORARY_PATH`, `MAX_MEMORY_REQUEST` (e.g. `IMAGEMAGICK_POLICY_MAX_MEMORY_REQUEST=2GiB`). Invalid values are ignored with a warning.
+
+**Auto-configuration** (`IMAGEMAGICK_POLICY_AUTOCONFIG=true`, default `false`): sizes `memory`, `map`, `disk` and `thread` per instance from the memory limit, the CPU quota, `SVC_INSTANCES` and the free temp space. It keeps room for half of the instances to read a large layered TIFF at once (about 3 GiB each) and never lowers `max-memory-request`. The memory limit comes from the cgroup, then `CONTAINER_MEMORY_LIMIT` (e.g. `8GiB`), then the ECS task metadata; without one, nothing is changed and a warning is logged. Examples:
+
+| Container | `SVC_INSTANCES` | memory | map | disk¹ | thread | Large TIFFs at once |
+|---|---|---|---|---|---|---|
+| 8 GB, 1 vCPU | 4 | 512MiB | 1GiB | 9GiB | 1 | 2 |
+| 16 GB, 2 vCPU | 8 | 512MiB | 1GiB | 4608MiB | 1 | 4 |
+
+¹ With 45 GiB free temp space.
 
 ### ImageMagick security policy
 

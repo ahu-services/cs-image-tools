@@ -4,6 +4,7 @@ import os
 import pwd
 import re
 import shutil
+import struct
 import subprocess
 import tempfile
 from pathlib import Path
@@ -375,3 +376,209 @@ def test_corretto_jdk_installed():
         pytest.fail("Java is not installed or cannot be executed.")
     except FileNotFoundError:
         pytest.fail("'java' command not found.")
+
+
+# --------------------------------------------------------------------------- #
+# ImageMagick policy: limits and large layered TIFF masters
+# --------------------------------------------------------------------------- #
+POLICY_PATH = Path("/usr/local/etc/ImageMagick-7/policy.xml")
+# Large enough to exceed max-memory-request=256MiB and the old 512MiB autoconfig
+# value; layered Photoshop TIFF masters carry blocks of 330-980 MB.
+LARGE_LAYER_BLOCK_BYTES = int(os.getenv("LARGE_LAYER_BLOCK_BYTES", "750000000"))
+
+
+def _write_layered_tiff(path, width=64, height=64, block_bytes=0):
+    """
+    Writes a synthetic big-endian RGB TIFF whose tag 37724 (ImageSourceData)
+    holds a valid one-layer Photoshop layer section, padded to block_bytes.
+    ImageMagick reads the composite from IFD0 and the layer as a second frame.
+    """
+    plane = bytes((x * 7 + y * 3) % 256 for y in range(height) for x in range(width))
+    record = struct.pack(">iiiiH", 0, 0, height, width, 3)
+    for channel_id in range(3):
+        record += struct.pack(">hI", channel_id, 2 + len(plane))
+    record += b"8BIMnorm" + bytes([255, 0, 0, 0])
+    extra = struct.pack(">II", 0, 0) + b"\x05Layer\x00\x00"
+    record += struct.pack(">I", len(extra)) + extra
+    channel_data = b"".join(struct.pack(">H", 0) + plane for _ in range(3))
+    layer_info = struct.pack(">h", 1) + record + channel_data
+    layer_info += b"\0" * (len(layer_info) % 2)
+    layer = (
+        b"Adobe Photoshop Document Data Block\0"
+        + b"8BIMLayr"
+        + struct.pack(">I", len(layer_info))
+        + layer_info
+    )
+    padding = max(0, block_bytes - len(layer))
+    pixels = bytes(
+        v
+        for y in range(height)
+        for x in range(width)
+        for v in (x * 4 % 256, y * 4 % 256, 128)
+    )
+    strip_offset = 8 + 6
+    block_offset = strip_offset + len(pixels)
+    block_offset += block_offset % 2
+    ifd_offset = block_offset + len(layer) + padding
+    ifd_offset += ifd_offset % 2
+    entries = [
+        (256, 4, 1, width),
+        (257, 4, 1, height),
+        (258, 3, 3, 8),
+        (259, 3, 1, 1),
+        (262, 3, 1, 2),
+        (273, 4, 1, strip_offset),
+        (277, 3, 1, 3),
+        (278, 4, 1, height),
+        (279, 4, 1, len(pixels)),
+        (284, 3, 1, 1),
+        (37724, 7, len(layer) + padding, block_offset),
+    ]
+    with open(path, "wb") as handle:
+        handle.write(b"MM\0*" + struct.pack(">I", ifd_offset))
+        handle.write(struct.pack(">HHH", 8, 8, 8))
+        handle.write(pixels)
+        handle.write(b"\0" * (block_offset - handle.tell()))
+        handle.write(layer)
+        chunk = b"\0" * (8 << 20)
+        while padding:
+            size = min(padding, len(chunk))
+            handle.write(chunk[:size])
+            padding -= size
+        handle.write(b"\0" * (ifd_offset - handle.tell()))
+        handle.write(struct.pack(">H", len(entries)))
+        for tag, kind, count, value in entries:
+            if kind == 3 and count == 1:
+                handle.write(struct.pack(">HHIHH", tag, kind, count, value, 0))
+            else:
+                handle.write(struct.pack(">HHII", tag, kind, count, value))
+        handle.write(struct.pack(">I", 0))
+
+
+def _convert_master(source, out):
+    """The conversion censhare runs for layered TIFF masters."""
+    return subprocess.run(
+        [MAGICK, str(source), "-delete", "1--1", "-resize", "4000x4000>", str(out)],
+        capture_output=True,
+        text=True,
+    )
+
+
+@pytest.fixture
+def rendered_policy(monkeypatch):
+    """Renders the policy with entrypoint.py and restores the bundled one afterwards."""
+    import entrypoint
+
+    backup = POLICY_PATH.read_bytes()
+    template = Path(str(POLICY_PATH) + ".dist")
+    had_template = template.exists()
+    for name in list(os.environ):
+        if name.startswith("IMAGEMAGICK_"):
+            monkeypatch.delenv(name)
+
+    def render(memory_bytes, instances, cpus=1.0, **env):
+        monkeypatch.setenv("IMAGEMAGICK_POLICY_AUTOCONFIG", "true")
+        monkeypatch.setenv("SVC_INSTANCES", str(instances))
+        for key, value in env.items():
+            monkeypatch.setenv(key, value)
+        monkeypatch.setattr(
+            entrypoint, "detect_container_memory_limit_bytes", lambda: memory_bytes
+        )
+        monkeypatch.setattr(
+            entrypoint, "detect_cpu_limit", lambda ecs_limits=None: (cpus, "test")
+        )
+        entrypoint.configure_imagemagick_policy(str(POLICY_PATH))
+
+    yield render
+    POLICY_PATH.write_bytes(backup)
+    if not had_template and template.exists():
+        template.unlink()
+
+
+def _policy_listing():
+    return subprocess.run(
+        [MAGICK, "-list", "policy"], capture_output=True, text=True, check=True
+    ).stdout
+
+
+def test_bundled_policy_limits():
+    listing = " ".join(_policy_listing().split())
+    for name, value in (
+        ("width", "32KP"),
+        ("height", "32KP"),
+        ("time", "120"),
+        ("max-memory-request", "1536MiB"),
+    ):
+        assert f"name: {name} value: {value}" in listing, f"{name} != {value}"
+
+
+def test_area_limit_caches_to_disk_instead_of_rejecting(tmp_path):
+    """Images above the area limit are cached to disk, not rejected."""
+    out = tmp_path / "out.jpg"
+    result = subprocess.run(
+        [MAGICK, "-size", "2000x2000", "xc:gray", "-resize", "50%", str(out)],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "MAGICK_AREA_LIMIT": "1MP"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert out.stat().st_size > 0
+
+
+def test_width_limit_rejects_wider_images(tmp_path):
+    result = subprocess.run(
+        [MAGICK, "-size", "33000x1", "xc:gray", str(tmp_path / "out.png")],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "width or height exceeds limit" in result.stderr
+
+
+def test_layered_tiff_layers_are_read_and_dropped(tmp_path):
+    source = tmp_path / "master.tif"
+    _write_layered_tiff(source)
+    frames = subprocess.run(
+        [MAGICK, "identify", "-format", "%s\\n", str(source)],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    assert frames == ["0", "1"], "Photoshop layer block was not decoded"
+
+    out = tmp_path / "preview.jpg"
+    result = _convert_master(source, out)
+    assert result.returncode == 0, result.stderr
+    size = subprocess.run(
+        [MAGICK, "identify", "-format", "%wx%h", str(out)],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert size == "64x64"
+
+
+def test_large_layer_block_converts_with_autoconfig_for_8gb_4_instances(
+    tmp_path, rendered_policy
+):
+    rendered_policy(8 * 1024**3, 4)
+    assert "max-memory-request value: 1536MiB" in " ".join(_policy_listing().split())
+    source = tmp_path / "master.tif"
+    _write_layered_tiff(source, block_bytes=LARGE_LAYER_BLOCK_BYTES)
+
+    result = _convert_master(source, tmp_path / "preview.jpg")
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_large_layer_block_fails_with_256mib_max_memory_request(
+    tmp_path, rendered_policy
+):
+    rendered_policy(8 * 1024**3, 4, IMAGEMAGICK_POLICY_MAX_MEMORY_REQUEST="256MiB")
+    source = tmp_path / "master.tif"
+    _write_layered_tiff(source, block_bytes=LARGE_LAYER_BLOCK_BYTES)
+
+    result = _convert_master(source, tmp_path / "preview.jpg")
+
+    assert result.returncode != 0
+    assert "memory allocation failed" in result.stderr.lower(), result.stderr

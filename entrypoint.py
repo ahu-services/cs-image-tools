@@ -1,5 +1,6 @@
 import hashlib
 import json
+import math
 import os
 import platform
 import re
@@ -10,6 +11,7 @@ import socket
 import subprocess
 import sys
 import tarfile
+import threading
 import time
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
@@ -31,6 +33,55 @@ DEFAULT_RMI_PORT = "30550"
 DEFAULT_IMAGEMAGICK_POLICY_PATH = "/usr/local/etc/ImageMagick-7/policy.xml"
 MIB = 1024 * 1024
 GIB = 1024 * MIB
+
+# ImageMagick policy rendering
+POLICY_TEMPLATE_SUFFIX = ".dist"
+POLICY_ENV_PREFIX = "IMAGEMAGICK_POLICY_"
+POLICY_CONTROL_ENV_VARS = {"IMAGEMAGICK_POLICY_AUTOCONFIG"}
+# Largest single allocation ImageMagick may request. Layered Photoshop TIFF
+# masters keep their layers in TIFF tag 37724, which is read as one block that
+# cannot spill to disk; blocks close to 1 GB occur in practice.
+DEFAULT_MAX_MEMORY_REQUEST = 1536 * MIB
+# Reading such a file needs about three times the block in anonymous memory
+# (measured: ~2.6 GiB for a 0.86 GiB block). Sizing assumes 1 GiB blocks.
+LARGE_JOB_BYTES = 3 * GIB
+_SIZE = r"\d+(\.\d+)?([KMGTPE]i?)?B?"
+_PIXELS = r"\d+(\.\d+)?([KMGTPE]P)?"
+_INT = r"\d+"
+# Policy settings that may be overridden with IMAGEMAGICK_POLICY_<NAME>
+# (name upper-cased, "-" as "_"): name -> (domain, value pattern).
+POLICY_SETTINGS = {
+    "memory": ("resource", _SIZE),
+    "map": ("resource", _SIZE),
+    "disk": ("resource", _SIZE),
+    "area": ("resource", f"({_PIXELS}|{_SIZE})"),
+    "width": ("resource", _PIXELS),
+    "height": ("resource", _PIXELS),
+    "list-length": ("resource", _INT),
+    "file": ("resource", _INT),
+    "thread": ("resource", _INT),
+    "throttle": ("resource", _INT),
+    "time": ("resource", _INT),
+    "temporary-path": ("resource", r"/[A-Za-z0-9._/-]*"),
+    "max-memory-request": ("system", _SIZE),
+}
+CGROUP_MEMORY_LIMIT_FILES = (
+    "/sys/fs/cgroup/memory.max",
+    "/sys/fs/cgroup/memory/memory.limit_in_bytes",
+)
+CGROUP_MEMORY_PEAK_FILES = (
+    "/sys/fs/cgroup/memory.peak",
+    "/sys/fs/cgroup/memory/memory.max_usage_in_bytes",
+)
+CGROUP_CPU_MAX_FILE = "/sys/fs/cgroup/cpu.max"
+CGROUP_V1_CPU_QUOTA_FILE = "/sys/fs/cgroup/cpu/cpu.cfs_quota_us"
+CGROUP_V1_CPU_PERIOD_FILE = "/sys/fs/cgroup/cpu/cpu.cfs_period_us"
+CGROUP_OOM_EVENT_FILES = (
+    "/sys/fs/cgroup/memory.events",
+    "/sys/fs/cgroup/memory/memory.oom_control",
+)
+CGROUP_V1_MEMORY_FAILCNT_FILE = "/sys/fs/cgroup/memory/memory.failcnt"
+MEMORY_MONITOR_INTERVAL_SECONDS = 60
 RMI_HOST_OPTION_PATTERN = re.compile(r"-Djava\.rmi\.server\.hostname=([^\s]+)")
 CLIENT_DOWNLOAD_URL = (
     "https://rpm.censhare.com/censhare-release/censhare-Service/v{version}"
@@ -102,15 +153,19 @@ def _format_binary_size(value):
     return f"{max(1, value // MIB)}MiB"
 
 
+def _format_human_size(value):
+    """Readable size for log lines, e.g. 58.9GiB."""
+    if value >= GIB:
+        return f"{value / GIB:.1f}GiB"
+    return f"{value / MIB:.0f}MiB"
+
+
 def detect_container_memory_limit_bytes():
     """
     Reads the effective container memory limit from cgroup v2/v1.
     Returns None when the container is effectively unlimited.
     """
-    for path in (
-        "/sys/fs/cgroup/memory.max",
-        "/sys/fs/cgroup/memory/memory.limit_in_bytes",
-    ):
+    for path in CGROUP_MEMORY_LIMIT_FILES:
         raw_value = _read_first_line(path)
         if not raw_value or raw_value == "max":
             continue
@@ -123,39 +178,188 @@ def detect_container_memory_limit_bytes():
     return None
 
 
-def recommend_imagemagick_policy(memory_limit_bytes, svc_instances):
+def read_ecs_task_limits(timeout=1.0):
     """
-    Derive conservative ImageMagick cache limits from the container memory limit.
-    Reserve headroom for the JVM, the service client, and non-ImageMagick tools.
+    Returns the task-level "Limits" of the ECS task metadata endpoint (v4), e.g.
+    {"CPU": 1, "Memory": 8192}, or None outside ECS. On Fargate the memory
+    limit is often set on the task only, so the container cgroup reads "max".
     """
-    workers = max(1, svc_instances)
+    base_url = os.getenv("ECS_CONTAINER_METADATA_URI_V4")
+    if not base_url:
+        return None
+    try:
+        response = requests.get(f"{base_url}/task", timeout=timeout)
+        limits = response.json().get("Limits") if response.status_code == 200 else None
+    except (requests.RequestException, ValueError, AttributeError) as exc:
+        print(f"Warning: Unable to read ECS task metadata: {exc}")
+        return None
+    return limits if isinstance(limits, dict) else None
+
+
+def detect_memory_limit():
+    """
+    Returns (bytes, source, ecs_limits). Order: cgroup v2/v1 (Docker,
+    Kubernetes and most container platforms), CONTAINER_MEMORY_LIMIT, ECS task
+    metadata. bytes and source are None when no limit is known.
+    """
+    limit = detect_container_memory_limit_bytes()
+    if limit is not None:
+        return limit, "cgroup", None
+    configured = os.getenv("CONTAINER_MEMORY_LIMIT", "").strip()
+    if configured:
+        limit = parse_policy_size(configured)
+        if limit:
+            return limit, "CONTAINER_MEMORY_LIMIT", None
+        print(f"Warning: Ignoring invalid CONTAINER_MEMORY_LIMIT={configured}")
+    ecs_limits = read_ecs_task_limits()
+    try:
+        memory_mib = int((ecs_limits or {}).get("Memory") or 0)
+    except (TypeError, ValueError):
+        memory_mib = 0
+    if memory_mib > 0:
+        return memory_mib * MIB, "ECS task metadata", ecs_limits
+    return None, None, ecs_limits
+
+
+def detect_cpu_limit(ecs_limits=None):
+    """
+    Returns (cpus, source): the cgroup CPU quota, the ECS task vCPU limit or
+    the number of online CPUs, in that order.
+    """
+    raw_v2 = _read_first_line(CGROUP_CPU_MAX_FILE)
+    if raw_v2:
+        parts = raw_v2.split()
+        if len(parts) == 2 and parts[0] != "max":
+            try:
+                return int(parts[0]) / int(parts[1]), "cgroup"
+            except (ValueError, ZeroDivisionError):
+                pass
+    quota = _read_first_line(CGROUP_V1_CPU_QUOTA_FILE)
+    period = _read_first_line(CGROUP_V1_CPU_PERIOD_FILE)
+    try:
+        if quota and period and int(quota) > 0:
+            return int(quota) / int(period), "cgroup"
+    except (ValueError, ZeroDivisionError):
+        pass
+    try:
+        ecs_cpu = float((ecs_limits or {}).get("CPU") or 0)
+    except (TypeError, ValueError):
+        ecs_cpu = 0
+    if ecs_cpu > 0:
+        return ecs_cpu, "ECS task metadata"
+    return float(os.cpu_count() or 1), "online CPUs"
+
+
+def _usable_memory(memory_limit_bytes):
+    """Container memory minus a reserve for the JVM, the OS and other tools."""
     reserve = min(
         max(int(memory_limit_bytes * 0.20), 768 * MIB), int(memory_limit_bytes * 0.35)
     )
-    usable_bytes = max(memory_limit_bytes - reserve, 512 * MIB)
-    per_worker_budget = max(usable_bytes // workers, 256 * MIB)
+    return max(memory_limit_bytes - reserve, 512 * MIB)
 
-    memory_limit = _round_down(
-        _clamp(int(per_worker_budget * 0.33), 256 * MIB, 1 * GIB), 64 * MIB
-    )
-    map_limit = _round_down(
-        _clamp(int(per_worker_budget * 0.66), 512 * MIB, 2 * GIB), 64 * MIB
-    )
-    max_memory_request = _round_down(
-        _clamp(memory_limit // 2, 128 * MIB, 512 * MIB), 64 * MIB
-    )
-    disk_limit = _round_down(
-        _clamp(max(int(usable_bytes * 1.5), 2 * GIB), 2 * GIB, 10 * GIB), 256 * MIB
-    )
-    thread_limit = "1" if workers > 1 else "2"
+
+def large_jobs_that_fit(memory_limit_bytes):
+    """How many large layered-TIFF conversions fit into memory at the same time."""
+    return _usable_memory(memory_limit_bytes) // LARGE_JOB_BYTES
+
+
+def recommend_imagemagick_policy(
+    memory_limit_bytes, svc_instances, cpu_count=None, temp_free_bytes=None
+):
+    """
+    Derive ImageMagick limits for one worker from the container size.
+
+    memory/map are the per-worker pixel-cache budget. They are sized after
+    reserving room for about half of the workers to read a large layered TIFF
+    at the same time (LARGE_JOB_BYTES each), because those allocations are not
+    covered by memory/map and cannot spill to disk. max-memory-request is the
+    largest single allocation (e.g. an embedded Photoshop layer block) and is
+    deliberately not derived from the per-worker budget.
+    """
+    workers = max(1, svc_instances)
+    usable = _usable_memory(memory_limit_bytes)
+    concurrent_large_jobs = math.ceil(workers / 2)
+    cache_budget = max(usable - concurrent_large_jobs * LARGE_JOB_BYTES, 0) // workers
+
+    memory_limit = _round_down(_clamp(cache_budget // 3, 512 * MIB, 2 * GIB), 64 * MIB)
+    map_limit = _round_down(_clamp(cache_budget * 2 // 3, 1 * GIB, 4 * GIB), 64 * MIB)
+    if temp_free_bytes:
+        disk_limit = _round_down(
+            _clamp(int(temp_free_bytes * 0.8) // workers, 2 * GIB, 64 * GIB),
+            256 * MIB,
+        )
+    else:
+        disk_limit = _round_down(
+            _clamp(max(int(usable * 1.5), 2 * GIB), 2 * GIB, 10 * GIB), 256 * MIB
+        )
+    if cpu_count:
+        thread_limit = str(_clamp(int(cpu_count // workers), 1, 4))
+    else:
+        thread_limit = "1" if workers > 1 else "2"
 
     return {
         "thread": thread_limit,
         "memory": _format_binary_size(memory_limit),
         "map": _format_binary_size(max(map_limit, memory_limit)),
         "disk": _format_binary_size(disk_limit),
-        "max-memory-request": _format_binary_size(max_memory_request),
+        "max-memory-request": _format_binary_size(DEFAULT_MAX_MEMORY_REQUEST),
     }
+
+
+def parse_policy_size(value):
+    """
+    Parses an ImageMagick size value such as "1536MiB", "2GiB", "1.5GB" or a
+    plain number of bytes. Returns bytes or None.
+    """
+    match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*([KMGTPE]i?)?B?\s*", str(value or ""))
+    if not match:
+        return None
+    number, prefix = match.groups()
+    if not prefix:
+        return int(float(number))
+    exponent = "KMGTPE".index(prefix[0]) + 1
+    base = 1024 if prefix.endswith("i") else 1000
+    return int(float(number) * base**exponent)
+
+
+def _policy_value_is_valid(name, value):
+    pattern = POLICY_SETTINGS[name][1]
+    if not re.fullmatch(pattern, value):
+        return False
+    if name == "thread":
+        return int(value) > 0
+    return True
+
+
+def _policy_env_name(policy_name):
+    return f"{POLICY_ENV_PREFIX}{policy_name.upper().replace('-', '_')}"
+
+
+def read_policy_overrides(environ=None):
+    """
+    Collects IMAGEMAGICK_POLICY_<NAME> overrides (e.g. IMAGEMAGICK_POLICY_LIST_LENGTH
+    -> list-length). Returns (overrides, ignored) where ignored lists
+    human-readable reasons for unknown names or invalid values.
+    """
+    environ = os.environ if environ is None else environ
+    known = {_policy_env_name(name): name for name in POLICY_SETTINGS}
+    overrides, ignored = {}, []
+    for env_name in sorted(environ):
+        if not env_name.startswith(POLICY_ENV_PREFIX):
+            continue
+        if env_name in POLICY_CONTROL_ENV_VARS:
+            continue
+        value = environ[env_name].strip()
+        if not value:
+            continue
+        policy_name = known.get(env_name)
+        if policy_name is None:
+            ignored.append(f"{env_name} (unknown policy setting)")
+        elif not _policy_value_is_valid(policy_name, value):
+            ignored.append(f"{env_name}={value} (invalid value)")
+        else:
+            overrides[policy_name] = value
+    return overrides, ignored
 
 
 def _set_policy_value(root, domain, name, value):
@@ -165,17 +369,52 @@ def _set_policy_value(root, domain, name, value):
     policy.set("value", str(value))
 
 
+def _get_policy_value(root, domain, name):
+    policy = root.find(f"./policy[@domain='{domain}'][@name='{name}']")
+    return policy.get("value") if policy is not None else None
+
+
+def _load_policy_template(policy_path):
+    """
+    Returns the parsed bundled policy. The first start keeps a pristine copy
+    next to the policy; later starts render from it, so a removed override is
+    not carried over by a restarted container.
+    """
+    template_path = policy_path + POLICY_TEMPLATE_SUFFIX
+    if not os.path.exists(template_path):
+        try:
+            shutil.copy2(policy_path, template_path)
+        except OSError as exc:
+            print(f"Warning: Unable to keep a copy of the bundled policy: {exc}")
+            return ET.parse(policy_path)
+    return ET.parse(template_path)
+
+
+def imagemagick_temp_dir(temporary_path=None):
+    """The directory ImageMagick writes its temp files to."""
+    return (
+        temporary_path
+        or os.getenv("MAGICK_TEMPORARY_PATH")
+        or os.getenv("TMPDIR")
+        or "/tmp"
+    )
+
+
 def configure_imagemagick_policy(policy_path=DEFAULT_IMAGEMAGICK_POLICY_PATH):
     """
-    Tune the installed ImageMagick policy for the current container and allow
-    explicit environment overrides for operators that need deterministic limits.
+    Renders the ImageMagick policy for this container from the bundled policy,
+    optional auto-configuration and optional IMAGEMAGICK_POLICY_<NAME>
+    overrides, and logs every effective value with its source. Without any of
+    these variables the bundled policy is used unchanged. Only reads local
+    files (and, on ECS without a container memory limit, the local metadata
+    endpoint), so it does not delay the Service-Client start.
     """
     if not os.path.exists(policy_path):
         print(f"Warning: ImageMagick policy file not found at {policy_path}")
         return
 
     try:
-        tree = ET.parse(policy_path)
+        tree = _load_policy_template(policy_path)
     except ET.ParseError as exc:
         print(f"Warning: Unable to parse ImageMagick policy {policy_path}: {exc}")
         return
@@ -183,55 +422,183 @@ def configure_imagemagick_policy(policy_path=DEFAULT_IMAGEMAGICK_POLICY_PATH):
     root = tree.getroot()
     svc_instances = _parse_positive_int(os.getenv("SVC_INSTANCES", "4"), 4)
     auto_config = str_to_bool(os.getenv("IMAGEMAGICK_POLICY_AUTOCONFIG", "false"))
-    detected_limit = detect_container_memory_limit_bytes()
+    overrides, ignored = read_policy_overrides()
 
-    applied_values = {}
-    if auto_config and detected_limit is not None:
-        applied_values.update(
-            recommend_imagemagick_policy(detected_limit, svc_instances)
-        )
-        print(
-            "Auto-configuring ImageMagick policy from container memory limit "
-            f"{_format_binary_size(detected_limit)} and SVC_INSTANCES={svc_instances}."
+    effective = {}
+    for name, (domain, _pattern) in POLICY_SETTINGS.items():
+        value = _get_policy_value(root, domain, name)
+        if value is not None:
+            effective[name] = (value, "bundled")
+
+    temporary_path = overrides.get("temporary-path")
+    if temporary_path:
+        try:
+            os.makedirs(temporary_path, exist_ok=True)
+        except OSError as exc:
+            ignored.append(f"IMAGEMAGICK_POLICY_TEMPORARY_PATH ({exc})")
+            overrides.pop("temporary-path")
+            temporary_path = None
+    temp_dir = imagemagick_temp_dir(
+        temporary_path or effective.get("temporary-path", (None,))[0]
+    )
+    try:
+        temp_free = shutil.disk_usage(temp_dir).free
+    except OSError:
+        temp_free = None
+
+    memory_limit, memory_source, ecs_limits = detect_memory_limit()
+    detected = [
+        "memory limit "
+        + (
+            f"{_format_human_size(memory_limit)} ({memory_source})"
+            if memory_limit
+            else "none detected"
+        ),
+        f"SVC_INSTANCES={svc_instances}",
+    ]
+    if temp_free is not None:
+        detected.append(f"temp {temp_dir} free {_format_human_size(temp_free)}")
+    notes = []
+    if auto_config and memory_limit is None:
+        notes.append(
+            "WARNING: IMAGEMAGICK_POLICY_AUTOCONFIG=true but no memory limit was "
+            "detected (cgroup, CONTAINER_MEMORY_LIMIT, ECS task metadata); "
+            "auto-configuration skipped, bundled values are used."
         )
     elif auto_config:
-        print(
-            "No finite container memory limit detected; keeping bundled ImageMagick policy defaults."
+        cpu_count, cpu_source = detect_cpu_limit(ecs_limits)
+        detected.append(f"cpu {cpu_count:g} ({cpu_source})")
+        recommended = recommend_imagemagick_policy(
+            memory_limit, svc_instances, cpu_count, temp_free
         )
-    else:
-        print("ImageMagick policy auto-configuration disabled.")
+        bundled_mmr = parse_policy_size(effective.get("max-memory-request", ("",))[0])
+        if bundled_mmr and bundled_mmr > parse_policy_size(
+            recommended["max-memory-request"]
+        ):
+            del recommended["max-memory-request"]
+        for name, value in recommended.items():
+            effective[name] = (value, "autoconfig")
+        fits = large_jobs_that_fit(memory_limit)
+        wanted = math.ceil(svc_instances / 2)
+        if fits < wanted:
+            notes.append(
+                f"WARNING: memory for {fits} concurrent large layered-TIFF "
+                f"conversion(s) (~{_format_binary_size(LARGE_JOB_BYTES)} each), "
+                f"{wanted} wanted for SVC_INSTANCES={svc_instances}; use a "
+                "larger container or fewer instances."
+            )
+    for name, value in overrides.items():
+        effective[name] = (value, f"env {_policy_env_name(name)}")
 
-    override_mapping = {
-        "thread": "IMAGEMAGICK_POLICY_THREAD",
-        "time": "IMAGEMAGICK_POLICY_TIME",
-        "memory": "IMAGEMAGICK_POLICY_MEMORY",
-        "map": "IMAGEMAGICK_POLICY_MAP",
-        "disk": "IMAGEMAGICK_POLICY_DISK",
-        "area": "IMAGEMAGICK_POLICY_AREA",
-        "file": "IMAGEMAGICK_POLICY_FILE",
-        "list-length": "IMAGEMAGICK_POLICY_LIST_LENGTH",
-        "width": "IMAGEMAGICK_POLICY_WIDTH",
-        "height": "IMAGEMAGICK_POLICY_HEIGHT",
-    }
-    for policy_name, env_name in override_mapping.items():
-        env_value = os.getenv(env_name)
-        if env_value:
-            applied_values[policy_name] = env_value.strip()
+    disk_bytes = parse_policy_size(effective.get("disk", ("",))[0])
+    if disk_bytes and temp_free is not None and temp_free < disk_bytes * svc_instances:
+        notes.append(
+            f"WARNING: {temp_dir} has {_format_human_size(temp_free)} free, less than "
+            f"disk={effective['disk'][0]} x SVC_INSTANCES={svc_instances}; large "
+            "conversions may fail with 'cache resources exhausted'."
+        )
 
-    max_memory_request = os.getenv("IMAGEMAGICK_POLICY_MAX_MEMORY_REQUEST")
-    if max_memory_request:
-        applied_values["max-memory-request"] = max_memory_request.strip()
-
-    for policy_name, value in applied_values.items():
-        domain = "system" if policy_name == "max-memory-request" else "resource"
-        _set_policy_value(root, domain, policy_name, value)
-
+    for name, (value, _source) in effective.items():
+        _set_policy_value(root, POLICY_SETTINGS[name][0], name, value)
     tree.write(policy_path, encoding="utf-8", xml_declaration=True)
-    if applied_values:
-        rendered = ", ".join(
-            f"{key}={value}" for key, value in sorted(applied_values.items())
+
+    facility_timeout = os.getenv("IMAGEMAGICK_TIMEOUT", "").strip()
+    lines = [
+        f"ImageMagick policy {policy_path} "
+        f"(auto-configuration {'enabled' if auto_config else 'disabled'}):",
+        "  detected: " + ", ".join(detected),
+    ]
+    lines += [
+        f"  {name}={value} ({source})" for name, (value, source) in effective.items()
+    ]
+    lines.append(
+        "  imagemagick facility timeout: "
+        + (
+            f"{facility_timeout}s (IMAGEMAGICK_TIMEOUT)"
+            if facility_timeout
+            else "Service-Client default (IMAGEMAGICK_TIMEOUT not set)"
         )
-        print(f"Configured ImageMagick policy: {rendered}")
+    )
+    lines += [f"  ignored: {item}" for item in ignored]
+    lines += [f"  {note}" for note in notes]
+    print("\n".join(lines))
+
+
+def _read_cgroup_memory_peak():
+    for path in CGROUP_MEMORY_PEAK_FILES:
+        raw_value = _read_first_line(path)
+        if raw_value and raw_value.isdigit():
+            return int(raw_value)
+    return None
+
+
+def _read_counter(path, key):
+    """Reads "<key> <number>" from a cgroup stat file such as memory.events."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            for line in handle:
+                parts = line.split()
+                if len(parts) == 2 and parts[0] == key and parts[1].isdigit():
+                    return int(parts[1])
+    except OSError:
+        return None
+    return None
+
+
+def read_oom_kill_count():
+    """
+    Returns (count, source) of OOM kills in this container: cgroup v2
+    memory.events, cgroup v1 memory.oom_control, else the v1 memory.failcnt
+    (times the limit was hit). (None, None) when none is readable.
+    """
+    for path in CGROUP_OOM_EVENT_FILES:
+        count = _read_counter(path, "oom_kill")
+        if count is not None:
+            return count, os.path.basename(path)
+    failcnt = _read_first_line(CGROUP_V1_MEMORY_FAILCNT_FILE)
+    if failcnt and failcnt.isdigit():
+        return int(failcnt), os.path.basename(CGROUP_V1_MEMORY_FAILCNT_FILE)
+    return None, None
+
+
+def container_memory_monitor_loop(interval=MEMORY_MONITOR_INTERVAL_SECONDS):
+    """
+    Runs in a daemon thread after the Service-Client started. Logs only
+    changes: a container memory peak that grew by more than 5 % and every rise
+    of the OOM kill counter (e.g. an ImageMagick process killed by the kernel).
+    """
+    last_peak = _read_cgroup_memory_peak()
+    last_oom, oom_source = read_oom_kill_count()
+    if last_oom:
+        print(f"Container OOM kills before monitoring: {last_oom} ({oom_source}).")
+    while True:
+        time.sleep(interval)
+        peak = _read_cgroup_memory_peak()
+        if peak and last_peak and peak > last_peak * 1.05:
+            print(f"Container memory peak: {_format_human_size(peak)}.")
+            last_peak = peak
+        elif peak and not last_peak:
+            last_peak = peak
+        count, oom_source = read_oom_kill_count()
+        if count is not None and last_oom is not None and count > last_oom:
+            print(
+                f"WARNING: {count - last_oom} process(es) in this container were "
+                f"killed for lack of memory ({oom_source} now {count}); check the "
+                "container size, SVC_INSTANCES and the ImageMagick policy."
+            )
+        if count is not None:
+            last_oom = count
+
+
+def start_container_memory_monitor():
+    """Starts the memory/OOM monitor without blocking the caller."""
+    thread = threading.Thread(
+        target=container_memory_monitor_loop,
+        name="container-memory-monitor",
+        daemon=True,
+    )
+    thread.start()
+    return thread
 
 
 def detect_rmi_host_ip():
@@ -960,7 +1327,10 @@ if __name__ == "__main__":
 
     required_jdk_major = select_jdk_major(client_version)
     ensure_corretto(required_jdk_major)
-    configure_imagemagick_policy()
+    try:
+        configure_imagemagick_policy()
+    except Exception as exc:  # noqa: BLE001 - the policy must never block the start
+        print(f"Warning: ImageMagick policy not configured, using bundled file: {exc}")
 
     # Install custom iccprofiles if provided in build
     icc_source = "/build_iccprofiles"
@@ -992,6 +1362,8 @@ if __name__ == "__main__":
     configure_xml(svc_host, svc_user)
     scrub_environment(CONFIG_SECRET_ENV_VARS)
     run_as_corpus(start_command)
+    # Log memory peaks and OOM kills in the background, after the start.
+    start_container_memory_monitor()
 
     # Log output handling
     startup_log_path = "/opt/corpus/censhare/censhare-Service-Client/logs/startup.log"
