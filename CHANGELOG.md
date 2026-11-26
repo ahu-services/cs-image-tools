@@ -8,6 +8,12 @@ described in the [GitHub releases](https://github.com/ahu-services/cs-image-tool
 Without new variables the image runs as before; auto-configuration stays off
 by default and all tuning is optional.
 
+### Updated
+
+- FFmpeg 9.0.2 -> 9.1, Debian base image 13.7 -> 13.8. ImageMagick
+  7.1.2-36, Ghostscript 10.08.0, ExifTool 13.64, pngquant 3.0.3 and the
+  Python packages are already the latest releases.
+
 ### Security
 
 - Published images never contain censhare software or credentials. For private
