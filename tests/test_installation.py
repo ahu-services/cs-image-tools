@@ -290,7 +290,7 @@ def test_exiftool_installed_and_version():
 
 def test_ffmpeg_installed_and_version():
     """Test that ffmpeg is installed, executable, and the version is correct."""
-    expected_version = "9.0.2"
+    expected_version = "9.1"
     try:
         # Check if 'ffmpeg' command is available and get version
         result = subprocess.run(
@@ -299,7 +299,7 @@ def test_ffmpeg_installed_and_version():
             text=True,
             check=True,
         )
-        assert expected_version in result.stdout, (
+        assert f"ffmpeg version {expected_version} " in result.stdout, (
             f"ffmpeg version does not match expected version: {expected_version}"
         )
     except subprocess.CalledProcessError:

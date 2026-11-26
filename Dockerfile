@@ -2,8 +2,8 @@
 # TODO build gslib
 # TODO build dmr https://github.com/ImageMagick/MagickCache
 
-### Create base image for others (Debian 13.7)
-FROM debian:13.7-slim AS debian-builder
+### Create base image for others (Debian 13.8)
+FROM debian:13.8-slim AS debian-builder
 
 RUN apt-get update && apt-get install -y wget build-essential libtool pkg-config \
     libfreetype-dev libfontconfig-dev libbz2-dev libzip-dev libzstd-dev \
@@ -81,7 +81,7 @@ COPY imagemagick-policy.xml /IM-build/usr/local/etc/ImageMagick-7/policy.xml
 
 ### Build ffmpeg
 FROM debian-builder AS ffmpeg-builder
-ARG FFMPEG_VERSION=9.0.2
+ARG FFMPEG_VERSION=9.1
 
 # Download and build ffmpeg
 WORKDIR /tmp
@@ -200,7 +200,7 @@ COPY --from=ffmpeg-builder /ffmpeg-build/ /TOOLS/
 COPY --from=pngquant-builder /pngquant-build/ /TOOLS/
 
 ### Final image
-FROM debian:13.7-slim AS final
+FROM debian:13.8-slim AS final
 
 RUN set -eux; \
     apt-get update; \
